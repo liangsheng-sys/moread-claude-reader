@@ -72,8 +72,23 @@ export function updateProgress(id, p) {
 export function addReadingTime(id, seconds) {
   const state = getState(id)
   const key = today()
-  state.readingLog[key] = (state.readingLog[key] ?? 0) + Math.max(0, Math.min(seconds, 120))
+  const secs = Math.max(0, Math.min(seconds, 120))
+  state.readingLog[key] = (state.readingLog[key] ?? 0) + secs
+  // 按小时细分，供阅读统计的时段分布
+  const hours = (state.readingHours ??= {})[key] ??= {}
+  const h = new Date().getHours()
+  hours[h] = (hours[h] ?? 0) + secs
   save(id, 'state', state)
+}
+
+// ---------- 陪伴足迹：交流流水 ----------
+// role: user | claude；source: reader | terminal；kind: chat（对话）| annotation | note | memory
+export const listExchanges = () => load(null, 'exchanges', [])
+
+export function logExchange(entry) {
+  const list = listExchanges()
+  list.push({ at: now(), ...entry })
+  save(null, 'exchanges', list)
 }
 
 // ---------- 批注 / 笔记 / 消息 ----------
@@ -159,10 +174,17 @@ export function pushInbox(entry) {
   return item
 }
 
+/** 待投递的条目。主动陪读事件（kind=event）过期即作废；questionsOnly 时只要用户发来的消息。 */
+export function pendingInbox({ questionsOnly = false } = {}) {
+  const t = Date.now()
+  return listInbox().filter(i => !i.seen && (i.kind === 'event'
+    ? !questionsOnly && (!i.expiresAt || Date.parse(i.expiresAt) > t)
+    : true))
+}
+
 export function takeInbox() {
-  const list = listInbox()
-  const pending = list.filter(i => !i.seen)
+  const pending = pendingInbox({ questionsOnly: true })
   for (const i of pending) i.seen = true
-  if (pending.length) save(null, 'inbox', list)
+  if (pending.length) save(null, 'inbox', listInbox())
   return pending
 }

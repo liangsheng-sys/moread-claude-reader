@@ -16,7 +16,10 @@ const mcp = new Server(
       '用户在墨知阅读器里发给你的消息会以 <channel source="moread-channel" kind="..." book_id="..." section="..."> 到达。' +
       'kind=ask 是选中一段原文后的提问，kind=message 是伴读面板留言，kind=reply 是对某条批注的回复（带 annotation_id）。' +
       '用户此时在看书、不在看终端：用 moread 的 say 工具把回答发到阅读器侧栏；kind=reply 时用 reply_annotation 回在那条批注下。' +
-      '需要原文时先 read_book_section / search_book，只读用户已读范围。这些消息已自动标记为已读，无需再调用 get_questions。',
+      '需要原文时先 read_book_section / search_book，只读用户已读范围。这些消息已自动标记为已读，无需再调用 get_questions。' +
+      'kind=event 是阅读器根据用户的阅读行为自动派来的「主动陪读」任务（读完一章、停留过久、隔天回来、一段阅读结束等），' +
+      '按内容里的要求做；带 task_id 的，调用 add_annotation 时必须传上（用于额度控制），额度用完会被拒绝，那就停止。' +
+      '主动任务里用户并没有在终端等你：完成后终端只回一句话。',
   },
 )
 await mcp.connect(new StdioServerTransport())
@@ -41,7 +44,7 @@ async function listen() {
     try {
       await ensureServer()
       await deliver()
-      const res = await fetch(`${base}/api/events`)
+      const res = await fetch(`${base}/api/events?client=channel`)
       const decoder = new TextDecoder()
       let buf = ''
       for await (const chunk of res.body) {

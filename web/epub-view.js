@@ -5,15 +5,20 @@ import { findQuote, fillColor, lineColor } from './anchor.js'
 
 const DRAW = { highlight: Overlayer.highlight, underline: Overlayer.underline, wavy: Overlayer.squiggly }
 
-const bookCSS = ({ fontSize }) => `
+const bookCSS = ({ fontSize }) => {
+  const dark = document.documentElement.dataset.mode === 'dark'
+  return `
   @namespace epub "http://www.idpf.org/2007/ops";
-  html { color-scheme: light dark; font-size: ${fontSize}% !important; }
-  @media (prefers-color-scheme: dark) { a:link { color: #a5b8f0; } }
+  html { color-scheme: ${dark ? 'dark' : 'light'}; font-size: ${fontSize}% !important; }
+  ${dark ? `html, body { background: transparent !important; color: #e3ddd2 !important; }
+  a:link { color: #a5b8f0; }
+  img { filter: brightness(.85); }` : ''}
   p, li, blockquote, dd { line-height: 1.75; text-align: justify; }
   pre, code { white-space: pre-wrap !important; font-size: .9em; }
   img, svg { max-width: 100%; height: auto; }
   aside[epub|type~="footnote"], aside[epub|type~="endnote"] { display: none; }
 `
+}
 
 export async function createEpubViewer({ stage, url, initial, onRelocate, onSelect, onAnnotationClick, getAnnotations, saveCfi }) {
   const view = document.createElement('foliate-view')
@@ -31,6 +36,7 @@ export async function createEpubViewer({ stage, url, initial, onRelocate, onSele
   r.setAttribute('max-column-count', '2')
   r.setAttribute('gap', '6%')
   r.setStyles?.(bookCSS({ fontSize }))
+  addEventListener('moread-theme', () => r.setStyles?.(bookCSS({ fontSize })))
 
   const byValue = new Map()
   const drawn = new Map() // section index -> Set(cfi)
@@ -120,5 +126,16 @@ export async function createEpubViewer({ stage, url, initial, onRelocate, onSele
     next: () => view.goRight(),
     prev: () => view.goLeft(),
     clearSelection: () => { for (const c of r.getContents()) c.doc?.getSelection()?.removeAllRanges() },
+    // 跳到某节并选中一句原文（搜索结果、大纲依据、术语出处）
+    locate: async (section, quote) => {
+      await view.goTo(section)
+      if (!quote) return
+      for (let i = 0; i < 20; i++) {
+        const c = r.getContents().find(c => c.index === section)
+        const range = c?.doc && findQuote(c.doc.body, quote)
+        if (range) { await view.select(view.getCFI(section, range)); return }
+        await new Promise(res => setTimeout(res, 100))
+      }
+    },
   }
 }

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知 · 回顾</title>
+<link rel="icon" href="/favicon.svg">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/nav.js"></script>
+<style>
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .filters select, .filters input { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+  .filters input { width: 200px; }
+  .filters select { max-width: 280px; }
+  .item input[type=checkbox] { align-self: start; outline: none; }
+  .group h2 { font: 600 16px var(--serif); margin: 26px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+  .group h2 small { font: 12px var(--sans); color: var(--ink-3); }
+  .item { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 8px; }
+  .item:hover { border-color: var(--ink-3); }
+  .item input { margin-top: 5px; }
+  .quote { font: 14px/1.75 var(--serif); border-left: 3px solid var(--line); padding-left: 10px; }
+  .note { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .meta { font-size: 12px; color: var(--ink-3); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .bar { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 24px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; box-shadow: 0 -4px 16px rgba(0,0,0,.06); }
+  .bar input { flex: 1; min-width: 200px; }
+  .empty { color: var(--ink-3); text-align: center; padding: 60px 0; }
+  .md { font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>回顾</h1>
+    <span class="muted" id="count"></span>
+    <span style="flex:1"></span>
+    <nav class="topnav" id="topnav"></nav>
+  </div>
+  <div class="filters">
+    <select id="fBook"><option value="">全部书</option></select>
+    <select id="fKind">
+      <option value="ann">划线与批注</option>
+      <option value="notes">笔记</option>
+    </select>
+    <select id="fWho">
+      <option value="">我和 Claude</option>
+      <option value="me">我的</option>
+      <option value="claude">Claude 的</option>
+    </select>
+    <input type="text" id="fText" placeholder="搜索原文或批注…">
+    <span style="flex:1"></span>
+    <button class="btn" id="exportBtn">导出为 Markdown</button>
+  </div>
+  <div id="list"><div class="empty">加载中…</div></div>
+</div>
+<div class="bar" id="askBar" hidden>
+  <span id="picked"></span>
+  <input type="text" id="askText" placeholder="想让 Claude 做什么？例如：把这几条串起来讲讲 / 出几道题考考我">
+  <button class="btn" id="clearPick">取消选择</button>
+  <button class="btn primary" id="askBtn">发给 Claude</button>
+</div>
+<script type="module">
+import { marked } from '/vendor/marked/marked.esm.js'
+import { lineColor } from '/anchor.js'
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const toast = text => { const el = document.createElement('div'); el.className = 'toast'; el.textContent = text; document.body.append(el); setTimeout(() => el.remove(), 3000) }
+const date = iso => new Date(iso).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+
+const data = await (await fetch('/api/review')).json()
+const books = Object.fromEntries(data.books.map(b => [b.id, b]))
+const unit = id => books[id]?.format === 'pdf' ? '页' : '节'
+$('#fBook').innerHTML += data.books.map(b => `<option value="${b.id}">${esc(b.title)}</option>`).join('')
+const picked = new Set()
+const key = (bookId, id) => `${bookId}|${id}`
+
+function filtered() {
+  const book = $('#fBook').value, who = $('#fWho').value, q = $('#fText').value.trim().toLowerCase()
+  const src = $('#fKind').value === 'ann' ? data.annotations : data.notes
+  return src.filter(x => (!book || x.bookId === book) && (!who || x.author === who) &&
+    (!q || [x.quote, x.note, x.title, x.content, ...(x.replies ?? []).map(r => r.text)].some(s => s?.toLowerCase().includes(q))))
+}
+
+function render() {
+  const list = filtered()
+  const isAnn = $('#fKind').value === 'ann'
+  $('#count').textContent = `${list.length} 条`
+  $('#fWho').disabled = false
+  if (!list.length) { $('#list').innerHTML = '<div class="empty">没有符合条件的内容。</div>'; return renderBar() }
+  const groups = new Map()
+  for (const x of list) { if (!groups.has(x.bookId)) groups.set(x.bookId, []); groups.get(x.bookId).push(x) }
+  $('#list').innerHTML = [...groups].map(([bookId, items]) => `<div class="group"><h2>${esc(books[bookId]?.title ?? '已移除的书')}<small>${items.length} 条</small></h2>${
+    items.sort((a, b) => isAnn ? a.section - b.section : b.updatedAt.localeCompare(a.updatedAt)).map(x => isAnn
+      ? `<label class="item"><input type="checkbox" data-pick="${key(bookId, x.id)}"${picked.has(key(bookId, x.id)) ? ' checked' : ''}><div><div class="quote" style="border-color:${lineColor(x.color)}">${esc(x.quote)}</div>${x.note ? `<div class="note">${x.author === 'claude' ? 'Claude：' : ''}${esc(x.note)}</div>` : ''}${x.replies?.length ? `<div class="note">💬 ${x.replies.length} 条讨论</div>` : ''}<div class="meta"><span>${x.author === 'claude' ? 'Claude' : '我'}</span><span>第 ${x.section} ${unit(bookId)}</span><span>${date(x.createdAt)}</span><a href="/reader.html?id=${bookId}&section=${x.section}&quote=${encodeURIComponent(x.quote.slice(0, 40))}">在书中查看 →</a></div></div></label>`
+      : `<div class="item" style="grid-template-columns:1fr"><div><b>${esc(x.title || '无题')}</b><div class="md">${marked.parse(esc(x.content))}</div><div class="meta"><span>${x.author === 'claude' ? 'Claude' : '我'}</span><span>${date(x.updatedAt)}</span><a href="/reader.html?id=${bookId}">打开这本书 →</a></div></div></div>`
+    ).join('')}</div>`).join('')
+  renderBar()
+}
+
+function renderBar() {
+  $('#askBar').hidden = !picked.size
+  $('#picked').textContent = `已选 ${picked.size} 条`
+}
+
+for (const id of ['#fBook', '#fKind', '#fWho']) $(id).onchange = render
+$('#fText').oninput = render
+$('#list').addEventListener('change', e => {
+  const k = e.target.dataset.pick
+  if (!k) return
+  e.target.checked ? picked.add(k) : picked.delete(k)
+  renderBar()
+})
+$('#clearPick').onclick = () => { picked.clear(); render() }
+$('#askBtn').onclick = async () => {
+  const items = [...picked].map(k => { const [bookId, id] = k.split('|'); return { bookId, id } })
+  const res = await (await fetch('/api/review/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: $('#askText').value.trim(), items }) })).json()
+  const status = await (await fetch('/api/status')).json()
+  toast(status.online ? `已把 ${res.count} 条发给 Claude，回复会出现在对应书的伴读面板` : `已留言（${res.count} 条），下次在终端说话时 Claude 会看到`)
+  picked.clear(); $('#askText').value = ''; render()
+}
+
+// 导出当前筛选结果
+$('#exportBtn').onclick = () => {
+  const list = filtered()
+  const isAnn = $('#fKind').value === 'ann'
+  const out = [`# 墨知 · 回顾（${new Date().toLocaleDateString('zh-CN')}）`, '']
+  const groups = new Map()
+  for (const x of list) { if (!groups.has(x.bookId)) groups.set(x.bookId, []); groups.get(x.bookId).push(x) }
+  for (const [bookId, items] of groups) {
+    out.push(`## ${books[bookId]?.title ?? '已移除的书'}`, '')
+    for (const x of items) {
+      if (isAnn) {
+        out.push(`> ${x.quote}`, '', `— 第 ${x.section} ${unit(bookId)} · ${x.author === 'claude' ? 'Claude' : '我'}`)
+        if (x.note) out.push('', x.note)
+        for (const r of x.replies ?? []) out.push('', `- **${r.author === 'claude' ? 'Claude' : '我'}**：${r.text}`)
+      } else out.push(`### ${x.title || '无题'}`, '', x.content)
+      out.push('')
+    }
+  }
+  // 沙箱外的普通页面，直接用 blob 下载
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([out.join('\n')], { type: 'text/markdown' }))
+  a.download = `墨知回顾-${new Date().toISOString().slice(0, 10)}.md`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+render()
+</script>
+</body>
+</html>

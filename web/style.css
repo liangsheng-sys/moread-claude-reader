@@ -22,15 +22,19 @@
   --line-blue: #3478d4;
   --line-pink: #d64f84;
   --line-purple: #7a4fd0;
+  /* 顺序色阶（热力图等「多少」）：单一紫色，浅 → 深 */
+  --seq-0: #ece8de; --seq-1: #dcd2f5; --seq-2: #b3a0ea; --seq-3: #8466d6; --seq-4: #5b3cb2;
+  --ok: #3e8e52;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #1b1a18; --surface: #242220; --ink: #e9e4da; --ink-2: #b4ada0; --ink-3: #7f796f;
-    --line: #38352f; --accent: #a58cf0; --accent-soft: #2f2940; --me: #e0b450;
-    --shadow: 0 6px 24px rgba(0, 0, 0, .45);
-    color-scheme: dark;
-  }
+/* 深色由 theme.js 写入 data-mode；色阶在深色里另取一组（低值暗、高值亮），不是简单反转 */
+:root[data-mode="dark"] {
+  --paper: #1b1a18; --surface: #242220; --ink: #e9e4da; --ink-2: #b4ada0; --ink-3: #7f796f;
+  --line: #38352f; --accent: #a58cf0; --accent-soft: #2f2940; --me: #e0b450;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .45);
+  --seq-0: #2a2825; --seq-1: #3b3360; --seq-2: #5a4a9c; --seq-3: #8670d6; --seq-4: #bba9f6;
+  --ok: #6cc083;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -59,3 +63,16 @@ textarea:focus, input:focus { outline: 2px solid var(--accent-soft); border-colo
 .md ul, .md ol { padding-left: 1.4em; margin: .4em 0; }
 .md h1, .md h2, .md h3 { font-size: 1.05em; margin: .8em 0 .3em; }
 .md blockquote { margin: .4em 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--ink-2); }
+
+/* 页面顶部导航（书库 / 回顾 / 统计 / 设置） */
+.topnav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.topnav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.topnav a:hover { background: var(--line); color: var(--ink); }
+.topnav a.on { color: var(--ink); font-weight: 600; background: var(--accent-soft); }
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 64px; }
+.page-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.page-head h1 { font: 600 24px var(--serif); margin: 0; letter-spacing: .05em; }
+.chip { border: 1px solid var(--line); background: none; border-radius: 14px; padding: 2px 10px; font-size: 12px; color: var(--ink-2); }
+.chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tooltip { position: fixed; z-index: 90; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+a.btn { text-decoration: none; color: inherit; display: inline-block; }

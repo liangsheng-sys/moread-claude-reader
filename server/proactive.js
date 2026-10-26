@@ -20,23 +20,51 @@ export const channelOnline = () => channelClients > 0
 
 // ---------- 章节划分 ----------
 
-/** 取目录里够用的一层作为「章」；没有目录时 PDF 每 10 页、EPUB 每节算一章。 */
+const CHAPTER_RE = /^\s*(第\s*[0-9０-９一二三四五六七八九十百零〇两]+\s*[章讲課课回]|chapter\s+[0-9ivxlc]+\b|lesson\s+\d+\b)/i
+
+/**
+ * 找出「章」：
+ * 1. 目录里有 ≥3 条形如「第N章 / Chapter N」的标题时，取它们最常见的那一层，该层从第一章起的条目都算章
+ *    （含其后的附录、后记）；章的结尾是下一个同层或更上层条目（如「第二部分」）。
+ *    这样不管书把章挂在目录的第几层（有的 PDF 把全书都挂在「目录」书签下面）都能找对。
+ * 2. 否则从最浅层往下找，直到最长的一「章」不超过全书的 35%。
+ * 3. 没有可用的目录：PDF 每 10 页、EPUB 每节算一章。
+ */
 export function chaptersOf(meta) {
   const last = meta.sectionBase + meta.sectionCount - 1
-  const entries = meta.toc.filter(t => t.section != null)
-  let starts
-  if (entries.length) {
-    let depth = 0
-    while (depth < 3 && entries.filter(t => t.depth <= depth).length < 3 && entries.some(t => t.depth > depth)) depth++
-    const map = new Map()
-    for (const t of entries.filter(t => t.depth <= depth)) if (!map.has(t.section)) map.set(t.section, t.title)
-    starts = [...map].sort((a, b) => a[0] - b[0])
-  } else {
-    const step = meta.format === 'pdf' ? 10 : 1
-    starts = []
-    for (let s = meta.sectionBase; s <= last; s += step) starts.push([s, meta.format === 'pdf' ? `第${s}–${Math.min(s + step - 1, last)}页` : `第${s}节`])
+  let entries = meta.toc.filter(t => t.section != null && t.section <= last).sort((a, b) => a.section - b.section)
+  // 有的扫描版 PDF 每页一个书签，标题就是页码，不是真目录
+  const pageMarks = entries.filter(t => /^\s*\d+\s*$/.test(t.title))
+  if (pageMarks.length > entries.length / 2) entries = entries.filter(t => !pageMarks.includes(t))
+  const build = (chapters, bounds) => {
+    const seen = new Set()
+    const starts = chapters.filter(t => !seen.has(t.section) && seen.add(t.section))
+    const cuts = [...new Set(bounds.map(t => t.section))].sort((a, b) => a - b)
+    return starts.map((t, i) => ({ index: i, title: t.title.trim(), start: t.section, end: (cuts.find(c => c > t.section) ?? last + 1) - 1 }))
   }
-  return starts.map(([start, title], i) => ({ index: i, title, start, end: (starts[i + 1]?.[0] ?? last + 1) - 1 }))
+  const named = entries.filter(t => CHAPTER_RE.test(t.title))
+  if (named.length >= 3) {
+    const count = {}
+    for (const t of named) count[t.depth] = (count[t.depth] ?? 0) + 1
+    const depth = Number(Object.entries(count).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0])
+    const first = Math.min(...named.filter(t => t.depth === depth).map(t => t.section))
+    return build(entries.filter(t => t.depth === depth && t.section >= first), entries.filter(t => t.depth <= depth))
+  }
+  if (entries.length) {
+    const maxDepth = Math.max(...entries.map(t => t.depth))
+    for (let d = 0; d <= maxDepth; d++) {
+      const level = entries.filter(t => t.depth <= d)
+      if (level.length < 3) continue
+      const chapters = build(level, level)
+      if (Math.max(...chapters.map(c => c.end - c.start + 1)) <= meta.sectionCount * 0.35) return chapters
+    }
+  }
+  const step = meta.format === 'pdf' ? 10 : 1
+  const out = []
+  for (let s = meta.sectionBase; s <= last; s += step) {
+    out.push({ index: out.length, title: meta.format === 'pdf' ? `第${s}–${Math.min(s + step - 1, last)}页` : `第${s}节`, start: s, end: Math.min(s + step - 1, last) })
+  }
+  return out
 }
 export const chapterAt = (meta, section) => chaptersOf(meta).filter(c => c.start <= section).pop() ?? null
 
@@ -86,7 +114,7 @@ export function readPermit(bookId) {
 const rt = new Map()
 const runtime = id => {
   let r = rt.get(id)
-  if (!r) rt.set(id, r = { section: null, sectionActive: 0, chapterActive: {}, lastBeat: 0, session: null, endDwell: 0 })
+  if (!r) rt.set(id, r = { section: null, sectionActive: 0, lastBeat: 0, session: null, endDwell: 0 })
   return r
 }
 
@@ -175,7 +203,7 @@ function maybeComplete(bookId, meta, ch) {
   const s = getSettings().proactive
   const r = runtime(bookId)
   const furthest = store.getState(bookId).furthest ?? -1
-  const active = r.chapterActive[ch.start] ?? 0
+  const active = store.getState(bookId).chapterActive?.[ch.start] ?? 0
   if (furthest < ch.end || active < s.chapterMinMinutes * MIN) return
   // 读完一章本身就是足迹，不管 Claude 在不在线都记下
   once(`${bookId}:chapterdone:${ch.start}`, () => store.logExchange({ role: 'system', kind: 'chapter_done', bookId, title: ch.title, section: ch.start }))
@@ -218,7 +246,12 @@ export function onHeartbeat(bookId, seconds) {
   if (section == null) return
   r.sectionActive += seconds
   const ch = chapterAt(meta, section)
-  if (ch) r.chapterActive[ch.start] = (r.chapterActive[ch.start] ?? 0) + seconds
+  // 每章读了多久存进 state，服务重启也不丢
+  if (ch) {
+    state.chapterActive ??= {}
+    state.chapterActive[ch.start] = (state.chapterActive[ch.start] ?? 0) + seconds
+    store.save(bookId, 'state', state)
+  }
 
   // 读到一章最后一页并停留了 90 秒：不必等翻到下一章
   if (ch && section === ch.end) {

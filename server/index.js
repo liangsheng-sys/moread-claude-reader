@@ -26,8 +26,10 @@ const config = {
   embedding: { enabled: true, model: 'Xenova/multilingual-e5-small', dtype: 'q8' },
   ...JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')),
 }
-// MOREAD_DATA_DIR：调试时指向一份数据副本，不碰真实的阅读记录
+// 调试：MOREAD_DATA_DIR 指向一份数据副本、MOREAD_PORT 换个端口，不碰真实的阅读记录。
+// 必须两个一起用：伴读监听（scripts/watch.mjs）发现默认端口上的服务停了会立刻用真实数据重新拉起。
 const dataDir = path.resolve(root, process.env.MOREAD_DATA_DIR || config.dataDir)
+if (process.env.MOREAD_PORT) config.port = Number(process.env.MOREAD_PORT)
 initStore(dataDir)
 initSettings({ spoilerGuard: config.spoilerGuard })
 initEmbedding(config.embedding)

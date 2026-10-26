@@ -10,7 +10,7 @@
 2. 双击 **`启动阅读器.bat`**，浏览器会打开书库。第一次会在后台解析书、建语义索引（模型约 118MB，下载到 `%USERPROFILE%\.cache\moread-desk`）。
 3. 在本目录打开 Claude Code：
    - **普通模式**：`claude`。你在终端说话时，Claude 自动知道你读到哪、选中了什么。
-   - **伴读模式（推荐）**：双击 **`和Claude一起读.bat`**。在阅读器里选中文字点「问 Claude」、在侧栏留言、回复批注，Claude 都会实时收到，回答也发回阅读器侧栏，不用切回终端。启动时会有开发者频道的确认提示，选 *I am using this for local development*。
+   - **伴读模式（推荐）**：双击 **`和Claude一起读.bat`**。在阅读器里选中文字点「问 Claude」、在侧栏留言、回复批注，Claude 都会实时收到，回答也发回阅读器侧栏，不用切回终端。原理：会话启动时自动运行 `/companion`，Claude 用 Monitor 工具挂一个监听脚本（`scripts/watch.mjs`），阅读器里有新消息就唤醒它。第一次会询问是否允许运行 `node scripts/watch.mjs`，选允许并不再询问。如果监听意外停了，在终端输入 `/companion` 即可恢复，期间的消息不会丢。
    - 第一次会询问是否启用本项目的 `moread` MCP 服务器，选同意。
 
 ## 阅读器
@@ -85,5 +85,6 @@
 ## 已知限制
 
 - 扫描版 PDF 没有文字层：不能检索、不能划线，但 Claude 仍可以直接看页面图片。
-- 「伴读模式」依赖 Claude Code 的 channels（研究预览），需要 claude.ai 账号登录；以后接口可能变化。
+- 伴读模式下 Claude 每 30 分钟会重启一次监听（Monitor 的时长上限），会占用极少量用量。
+- `server/channel.js` 是基于 Claude Code channels（研究预览）的旧方案，很多账号尚未开放，会被 Claude Code 静默丢弃，目前不再使用。
 - 只监听 `127.0.0.1`，局域网其他设备访问不到。

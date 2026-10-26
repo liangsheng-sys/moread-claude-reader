@@ -112,5 +112,22 @@ export async function createPdfViewer({ stage, url, initial, onRelocate, onSelec
     next: () => viewer.nextPage(),
     prev: () => viewer.previousPage(),
     clearSelection: () => document.getSelection()?.removeAllRanges(),
+    // 跳到某页并选中一句原文（搜索结果、大纲依据、术语出处）
+    locate: async (section, quote) => {
+      viewer.currentPageNumber = section
+      if (!quote) return
+      for (let i = 0; i < 30; i++) {
+        const layer = viewer.getPageView(section - 1)?.div?.querySelector('.textLayer')
+        const range = layer?.querySelector('span') && findQuote(layer, quote)
+        if (range) {
+          const sel = document.getSelection()
+          sel.removeAllRanges()
+          sel.addRange(range)
+          range.startContainer.parentElement?.scrollIntoView({ block: 'center' })
+          return
+        }
+        await new Promise(res => setTimeout(res, 100))
+      }
+    },
   }
 }

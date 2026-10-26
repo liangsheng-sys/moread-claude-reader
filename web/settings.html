@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知 · 设置</title>
+<link rel="icon" href="/favicon.svg">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/nav.js"></script>
+<style>
+  .page { max-width: 760px; }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 18px; margin-bottom: 16px; }
+  section h2 { font: 600 15px var(--serif); margin: 12px 0 2px; }
+  section > .desc { font-size: 12px; color: var(--ink-3); margin-bottom: 6px; }
+  .row { display: flex; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+  section h2 + .row, section .desc + .row { border-top: 0; }
+  .row .label { flex: 1; min-width: 0; }
+  .row .label small { display: block; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+  .row.sub { padding-left: 18px; }
+  .row.off { opacity: .45; }
+  input[type=number] { width: 72px; font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; text-align: right; }
+  select { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .switch { position: relative; width: 36px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; z-index: 1; }
+  .switch span { position: absolute; inset: 0; border-radius: 10px; background: var(--line); transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(16px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .quota { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); padding: 8px 0 12px; }
+  .quota b { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 5px; }
+  .status-dot.on { background: var(--ok); }
+  .mem { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .mem .tag { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+  .mem .c { flex: 1; }
+  .mem small { color: var(--ink-3); display: block; font-size: 11px; }
+  .saved { font-size: 12px; color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>设置</h1>
+    <span class="saved" id="saved" hidden>已保存</span>
+    <span style="flex:1"></span>
+    <nav class="topnav" id="topnav"></nav>
+  </div>
+  <div id="root"></div>
+</div>
+<script type="module">
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const post = body => fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+
+let { settings, quota } = await (await fetch('/api/settings')).json()
+let memories = await (await fetch('/api/memories')).json()
+
+const sw = (path, on) => `<label class="switch"><input type="checkbox" data-path="${path}"${on ? ' checked' : ''}><span></span></label>`
+const num = (path, v, unit) => `<span><input type="number" data-path="${path}" value="${v}"> ${unit}</span>`
+const row = (label, hint, control, { sub = false, off = false } = {}) =>
+  `<div class="row${sub ? ' sub' : ''}${off ? ' off' : ''}"><div class="label">${label}${hint ? `<small>${hint}</small>` : ''}</div>${control}</div>`
+
+function render() {
+  const p = settings.proactive
+  const theme = moreadTheme.get()
+  $('#root').innerHTML = `
+  <section>
+    <h2>主动陪读</h2>
+    <div class="desc">只在用「和Claude一起读.bat」启动时生效。Claude 的主动行为会占用你的 Claude 订阅用量，不额外花钱。</div>
+    <div class="quota"><span><span class="status-dot${quota.online ? ' on' : ''}"></span>${quota.online ? 'Claude 在线（伴读模式已连接）' : 'Claude 不在线'}</span><span>今日主动批注 <b>${quota.annotations}</b> / ${quota.annotationMax}</span><span>今日主动事件 <b>${quota.events}</b> / ${quota.eventMax}</span></div>
+    ${row('随读段评', '读完一章后，Claude 读这一章并在书上留 1~2 条批注（MoRead 同名功能）', sw('proactive.chapterAnnotations', p.chapterAnnotations))}
+    ${row('时机', '进入章节时：Claude 会提前读这一章，翻到时批注已经在了', `<select data-path="proactive.timing"><option value="after"${p.timing === 'after' ? ' selected' : ''}>读完一章后</option><option value="entry"${p.timing === 'entry' ? ' selected' : ''}>进入章节时</option></select>`, { sub: true, off: !p.chapterAnnotations })}
+    ${row('每章条数', '下限可以是 0：没什么值得说的就不留', `<span>${num('proactive.minPerChapter', p.minPerChapter, '~')}${num('proactive.maxPerChapter', p.maxPerChapter, '条')}</span>`, { sub: true, off: !p.chapterAnnotations })}
+    ${row('每日上限', '', num('proactive.dailyMax', p.dailyMax, '条'), { sub: true, off: !p.chapterAnnotations })}
+    ${row('至少读多久才算读完', '快速翻过的章节不触发', num('proactive.chapterMinMinutes', p.chapterMinMinutes, '分钟'), { sub: true })}
+    ${row('读完一章时整理术语', '新概念写进术语表（目录 → 术语）', sw('proactive.termsOnChapter', p.termsOnChapter))}
+    ${row('读完一章时写大纲', '每章要点 + 原文依据（目录 → 大纲）', sw('proactive.outlineOnChapter', p.outlineOnChapter))}
+    ${row('卡住时问一句', '同一页停留过久时，问问要不要帮忙', sw('proactive.stuck', p.stuck))}
+    ${row('停留多久算卡住', '', num('proactive.stuckMinutes', p.stuckMinutes, '分钟'), { sub: true, off: !p.stuck })}
+    ${row('回来时打招呼', '隔一段时间再打开书，Claude 简短回顾上次读到哪', sw('proactive.welcomeBack', p.welcomeBack))}
+    ${row('隔多久算「回来」', '', num('proactive.welcomeGapHours', p.welcomeGapHours, '小时'), { sub: true, off: !p.welcomeBack })}
+    ${row('读完一段后记录进度', 'Claude 静默更新这本书的学习摘要和长期记忆，下次接着聊', sw('proactive.sessionMemory', p.sessionMemory))}
+    ${row('至少读多久才记录', '', num('proactive.sessionMinMinutes', p.sessionMinMinutes, '分钟'), { sub: true, off: !p.sessionMemory })}
+    ${row('提醒休息', '', sw('proactive.breakReminder', p.breakReminder))}
+    ${row('连续读多久提醒', '', num('proactive.breakMinutes', p.breakMinutes, '分钟'), { sub: true, off: !p.breakReminder })}
+    ${row('每日主动事件总上限', '所有主动行为加起来，防止意外刷屏、占满用量', num('proactive.dailyEventMax', p.dailyEventMax, '次'))}
+  </section>
+  <section>
+    <h2>阅读</h2>
+    ${row('防剧透', 'Claude 默认只能读你读过的最远位置', sw('spoilerGuard', settings.spoilerGuard))}
+    ${row('主题', '', `<select id="theme"><option value="system"${theme === 'system' ? ' selected' : ''}>跟随系统</option><option value="light"${theme === 'light' ? ' selected' : ''}>浅色</option><option value="dark"${theme === 'dark' ? ' selected' : ''}>深色</option></select>`)}
+  </section>
+  <section>
+    <h2>Claude 记住的事</h2>
+    <div class="desc">跨书的长期记忆：你的理解、困惑、兴趣和习惯。Claude 陪读时会参考；不对的可以删掉。</div>
+    ${memories.memories.length ? [...memories.memories].reverse().map(m => `<div class="mem"><span class="tag">${esc(memories.kinds[m.kind] ?? m.kind)}</span><div class="c">${esc(m.content)}<small>${m.bookTitle ? `《${esc(m.bookTitle)}》 · ` : ''}${new Date(m.createdAt).toLocaleDateString('zh-CN')}</small></div><button class="icon-btn" data-delmem="${m.id}" title="删除">×</button></div>`).join('') : '<div class="row"><div class="label muted">还没有。</div></div>'}
+  </section>`
+}
+
+let savedTimer
+const flash = () => { $('#saved').hidden = false; clearTimeout(savedTimer); savedTimer = setTimeout(() => { $('#saved').hidden = true }, 1500) }
+$('#root').addEventListener('change', async e => {
+  const t = e.target
+  if (t.id === 'theme') { moreadTheme.set(t.value); return flash() }
+  const path = t.dataset.path
+  if (!path) return
+  const value = t.type === 'checkbox' ? t.checked : t.type === 'number' ? Number(t.value) : t.value
+  const patch = {}
+  const keys = path.split('.')
+  keys.reduce((o, k, i) => (o[k] = i === keys.length - 1 ? value : {}), patch)
+  ;({ settings, quota } = await post(patch))
+  render()
+  flash()
+})
+$('#root').addEventListener('click', async e => {
+  const id = e.target.closest('[data-delmem]')?.dataset.delmem
+  if (!id) return
+  await fetch(`/api/memories/${id}`, { method: 'DELETE' })
+  memories = await (await fetch('/api/memories')).json()
+  render()
+})
+render()
+</script>
+</body>
+</html>

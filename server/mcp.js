@@ -5,6 +5,10 @@ import { currentBookId, getBook, listBooks, loadBook, summary } from './library.
 import { grep } from './search.js'
 import { readEpubImage, normalizeChars } from './extract.js'
 import * as store from './store.js'
+import { getSettings } from './settings.js'
+import { chapterAt, quotaStatus, readPermit, useAnnotationQuota } from './proactive.js'
+import { getBookSummary, MEMORY_KINDS, recallMemories, saveBookSummary, saveMemory } from './memory.js'
+import { listOutlines, listTerms, saveOutline, saveTerm } from './knowledge.js'
 
 const MAX_READ_CHARS = 8000
 
@@ -28,16 +32,17 @@ function tocItemFor(meta, section) {
   return hit?.title ?? null
 }
 
-/** 阅读范围：默认只到读过的最远位置（防剧透 / 跟上用户节奏）。 */
-function scopeOf(id, meta, includeUnread, guard) {
+/** 阅读范围：默认只到读过的最远位置（防剧透 / 跟上用户节奏）。「进入章节时批注」会临时放开到本章末尾。 */
+function scopeOf(id, meta, includeUnread) {
   const furthest = store.getState(id).furthest
-  if (includeUnread || !guard || furthest == null) return { max: Infinity, furthest }
-  return { max: furthest, furthest }
+  if (includeUnread || !getSettings().spoilerGuard || furthest == null) return { max: Infinity, furthest }
+  return { max: Math.max(furthest, readPermit(id) ?? -1), furthest }
 }
 
-export function createMcpServer(config) {
-  const guard = config.spoilerGuard !== false
-  const server = new McpServer({ name: 'moread-desk', version: '0.1.0' }, {
+const chars = s => [...(s ?? '')].length
+
+export function createMcpServer() {
+  const server = new McpServer({ name: 'moread-desk', version: '0.2.0' }, {
     instructions: '墨知桌面伴读：读取用户在本地阅读器里的进度、正文、划线，并能在书页上留下批注、在侧栏说话。默认只读取用户已读范围。',
   })
 
@@ -70,11 +75,14 @@ export function createMcpServer(config) {
       file: getBook(id).file,
       total: `${meta.sectionCount}${meta.sectionUnit}`,
       current: p ? { section: p.section, where: sectionName(meta, p.section), label: p.label, chapter: p.tocLabel ?? tocItemFor(meta, p.section), percent: Math.round((p.fraction ?? 0) * 100), updated_at: p.updatedAt } : null,
+      chapter_range: p && chapterAt(meta, p.section) ? (({ title, start, end }) => ({ title, start, end }))(chapterAt(meta, p.section)) : undefined,
+      learning_summary: getBookSummary(id) ?? undefined,
       furthest_read: state.furthest != null ? sectionName(meta, state.furthest) : null,
       selection: selection ? { section: selection.section, text: selection.text, at: selection.at } : null,
       reading_minutes_today: Math.round((state.readingLog[store.today()] ?? 0) / 60),
       reading_days: days.length,
-      pending_questions: store.listInbox().filter(i => !i.seen).length,
+      pending_questions: store.pendingInbox({ questionsOnly: true }).length,
+      proactive_quota_today: (({ annotations, annotationMax }) => `主动批注 ${annotations}/${annotationMax}`)(quotaStatus()),
       scanned_pdf: meta.scanned || undefined,
       tip: meta.format === 'pdf' ? '需要看页面上的图/公式/代码截图时，用 Read 工具读取 file 并传 pages 参数。' : undefined,
     })
@@ -104,7 +112,7 @@ export function createMcpServer(config) {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const { sections } = loadBook(r.id)
-    const scope = scopeOf(r.id, r.meta, include_unread, guard)
+    const scope = scopeOf(r.id, r.meta, include_unread)
     const end = Math.min(to ?? from, from + 30)
     if (from > scope.max) return fail(`${sectionName(r.meta, from)} 用户还没读到（最远读到 ${sectionName(r.meta, scope.furthest)}）。如用户同意剧透，可传 include_unread: true。`)
     const picked = sections.filter(s => s.index >= from && s.index <= Math.min(end, scope.max))
@@ -139,7 +147,7 @@ export function createMcpServer(config) {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const { index } = loadBook(r.id)
-    const scope = scopeOf(r.id, r.meta, include_unread, guard)
+    const scope = scopeOf(r.id, r.meta, include_unread)
     const allow = c => c.section <= scope.max && (from == null || c.section >= from) && (to == null || c.section <= to)
     const { results, usedVector, semanticError } = await index.search(query, { allow, topK: top_k, mode })
     const note = []
@@ -160,7 +168,7 @@ export function createMcpServer(config) {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const { sections } = loadBook(r.id)
-    const scope = scopeOf(r.id, r.meta, include_unread, guard)
+    const scope = scopeOf(r.id, r.meta, include_unread)
     let res
     try { res = grep(sections, pattern, { regex, allow: s => s.index <= scope.max, max }) }
     catch (e) { return fail(`正则无效：${e.message}`) }
@@ -211,15 +219,23 @@ export function createMcpServer(config) {
       note: z.string().describe('你的批注'),
       style: z.enum(['highlight', 'underline', 'wavy']).optional(),
       color: z.enum(['yellow', 'green', 'blue', 'pink', 'purple']).optional(),
+      task_id: z.string().optional().describe('主动陪读任务带来的 task_id（有就必须带上，用于额度控制）'),
     },
-  }, async ({ book_id, section, quote, note, style = 'wavy', color = 'purple' }) => {
+  }, async ({ book_id, section, quote, note, style = 'wavy', color = 'purple', task_id }) => {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const s = loadBook(r.id).sections.find(x => x.index === section)
     if (!s) return fail(`没有${sectionName(r.meta, section)}。`)
+    if (section > scopeOf(r.id, r.meta, false).max) return fail(`${sectionName(r.meta, section)}用户还没读到，不能在那里留批注。`)
     const squash = t => normalizeChars(t).replace(/\s+/g, '')
     if (!squash(s.text).includes(squash(quote))) return fail(`${sectionName(r.meta, section)}里找不到这段原文，请用 read_book_section 核对后逐字引用。`)
-    const item = store.addAnnotation(r.id, { section, quote, note, style, color, author: 'claude' })
+    if (store.listAnnotations(r.id).some(a => a.author === 'claude' && a.section === section && squash(a.quote) === squash(quote))) return fail('你已经在这段原文上留过批注了。')
+    if (task_id) {
+      const q = useAnnotationQuota(task_id, r.id, section)
+      if (!q.ok) return fail(q.reason)
+    }
+    const item = store.addAnnotation(r.id, { section, quote, note, style, color, author: 'claude', proactive: !!task_id })
+    store.logExchange({ role: 'claude', kind: 'annotation', bookId: r.id, section, chars: chars(note), proactive: !!task_id })
     return text(`已在${sectionName(r.meta, section)}留下批注（id: ${item.id}）。`)
   })
 
@@ -229,7 +245,9 @@ export function createMcpServer(config) {
   }, async ({ book_id, annotation_id, text: body }) => {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
-    return store.replyAnnotation(r.id, annotation_id, 'claude', body) ? text('已回复。') : fail('找不到这条批注。')
+    if (!store.replyAnnotation(r.id, annotation_id, 'claude', body)) return fail('找不到这条批注。')
+    store.logExchange({ role: 'claude', kind: 'chat', source: 'reader', bookId: r.id, chars: chars(body) })
+    return text('已回复。')
   })
 
   server.registerTool('list_notes', {
@@ -249,6 +267,7 @@ export function createMcpServer(config) {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const item = store.writeNote(r.id, { noteId: note_id, title, content, author: 'claude' })
+    if (!note_id) store.logExchange({ role: 'claude', kind: 'note', bookId: r.id, chars: chars(content) })
     return text(`笔记已保存（id: ${item.id}）。`)
   })
 
@@ -260,6 +279,7 @@ export function createMcpServer(config) {
     if (r.error) return fail(r.error)
     const p = store.getState(r.id).progress
     store.addMessage(r.id, 'claude', message, { section: p?.section })
+    store.logExchange({ role: 'claude', kind: 'chat', source: 'reader', bookId: r.id, chars: chars(message) })
     return text('已发送到阅读器。')
   })
 
@@ -274,6 +294,107 @@ export function createMcpServer(config) {
       const where = b?.meta ? `《${b.meta.title}》${i.section != null ? sectionName(b.meta, i.section) : ''}` : ''
       return { kind: { ask: '选段提问', message: '面板留言', reply: '回复批注' }[i.kind] ?? i.kind, book_id: i.bookId, where, quote: i.quote, text: i.text, annotation_id: i.annotationId, at: i.at }
     }))
+  })
+
+  // ---------- 记忆（对应 MoRead 的滚动剧情摘要 + 长期记忆） ----------
+
+  server.registerTool('save_book_summary', {
+    description: '覆盖更新这本书的「学习进度摘要」：读到哪、掌握了哪些概念、还有什么疑问。只保留最新一份，下次陪读（或用户隔天回来）时会先看到它。200~500 字为宜。',
+    inputSchema: { ...bookArg, content: z.string() },
+  }, async ({ book_id, content }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    saveBookSummary(r.id, content, store.getState(r.id).furthest)
+    return text('学习进度摘要已更新。')
+  })
+
+  server.registerTool('save_memory', {
+    description: `记下一条值得长期记住的事，跨书、跨会话可用 recall_memory 想起来。适合：用户对某概念的困惑或理解程度、兴趣点、学习习惯、阶段性进展。不要记书的内容本身（那用笔记）。kind：${Object.entries(MEMORY_KINDS).map(([k, v]) => `${k}=${v}`).join('，')}。`,
+    inputSchema: {
+      ...bookArg,
+      kind: z.enum(Object.keys(MEMORY_KINDS)),
+      content: z.string().describe('一两句话，写清楚主语和具体内容，脱离上下文也能看懂'),
+      global: z.boolean().optional().describe('与具体某本书无关（如学习习惯）时设为 true'),
+    },
+  }, async ({ book_id, kind, content, global }) => {
+    let bookId = null, section = null
+    if (!global) {
+      const r = resolve(book_id)
+      if (r.error) return fail(r.error)
+      bookId = r.id
+      section = store.getState(r.id).progress?.section ?? null
+    }
+    await saveMemory({ bookId, kind, content, section })
+    store.logExchange({ role: 'claude', kind: 'memory', bookId, chars: chars(content) })
+    return text('已记住。')
+  })
+
+  server.registerTool('recall_memory', {
+    description: '按意思检索以前记下的长期记忆（用户的困惑、兴趣、进展等）。',
+    inputSchema: { query: z.string(), book_id: z.string().optional().describe('只查这本书的记忆；省略则查全部'), top_k: z.number().int().min(1).max(20).optional() },
+  }, async ({ query, book_id, top_k = 8 }) => {
+    const list = await recallMemories(query, { bookId: book_id, topK: top_k })
+    if (!list.length) return text('没有相关记忆。')
+    return text(list.map(m => `- [${MEMORY_KINDS[m.kind] ?? m.kind}] ${m.content}（${m.createdAt.slice(0, 10)}${m.bookId ? ` · ${getBook(m.bookId)?.meta?.title ?? ''}` : ''}）`).join('\n'))
+  })
+
+  // ---------- 章节大纲与术语表 ----------
+
+  server.registerTool('save_chapter_outline', {
+    description: '保存一章的大纲（显示在阅读器「目录 → 大纲」里，用户可展开看依据并跳回原文）。每个要点附一句逐字原文作为依据。同一章再次保存会覆盖。',
+    inputSchema: {
+      ...bookArg,
+      section: z.number().int().describe('这一章内的任意页码 / 节号'),
+      points: z.array(z.object({
+        text: z.string().describe('要点，一句话'),
+        quote: z.string().optional().describe('逐字原文依据'),
+        section: z.number().int().optional().describe('依据所在页 / 节'),
+      })).min(1).max(12),
+    },
+  }, async ({ book_id, section, points }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    const ch = chapterAt(r.meta, section)
+    if (!ch) return fail('这一页不在任何章节里。')
+    if (ch.start > scopeOf(r.id, r.meta, false).max) return fail('这一章用户还没读到。')
+    saveOutline(r.id, { start: ch.start, end: ch.end, title: ch.title, points })
+    return text(`已保存「${ch.title}」的大纲（${points.length} 个要点）。`)
+  })
+
+  server.registerTool('list_terms', {
+    description: '列出这本书已整理的术语表。',
+    inputSchema: { ...bookArg },
+  }, async ({ book_id }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    const list = listTerms(r.id)
+    return text(list.length ? list.map(t => `- ${t.term}${t.aliases.length ? `（${t.aliases.join('、')}）` : ''}：${t.definition}${t.section != null ? `［${sectionName(r.meta, t.section)}］` : ''}`).join('\n') : '术语表是空的。')
+  })
+
+  server.registerTool('save_term', {
+    description: '把一个术语 / 概念记进术语表（阅读器「目录 → 术语」里可搜索、可跳回出处）。同名术语会覆盖更新。definition 用自己的话写，简洁准确；quote 是书中定义或首次出现处的逐字原文。',
+    inputSchema: {
+      ...bookArg,
+      term: z.string(), definition: z.string(),
+      section: z.number().int().optional(), quote: z.string().optional(),
+      aliases: z.array(z.string()).optional().describe('别名、英文名、缩写'),
+    },
+  }, async ({ book_id, term, definition, section, quote, aliases }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    if (section != null && section > scopeOf(r.id, r.meta, false).max) return fail('出处在用户还没读到的地方。')
+    saveTerm(r.id, { term, definition, section, quote, aliases })
+    return text(`已记入术语表：${term}`)
+  })
+
+  server.registerTool('list_outlines', {
+    description: '查看已保存的章节大纲。',
+    inputSchema: { ...bookArg },
+  }, async ({ book_id }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    const all = Object.values(listOutlines(r.id))
+    return text(all.length ? all.map(o => `## ${o.title}\n${o.points.map(p => `- ${p.text}`).join('\n')}`).join('\n\n') : '还没有章节大纲。')
   })
 
   return server

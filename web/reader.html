@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>墨知</title>
+<link rel="icon" href="/favicon.svg">
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/style.css">
 <style>
   body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 1fr auto; height: 100vh; overflow: hidden; }
@@ -18,7 +20,10 @@
   .pdf-container { position: absolute; inset: 0; overflow: auto; background: var(--paper); }
   .pdfViewer .page { box-shadow: 0 2px 10px rgba(0,0,0,.12); border: 0 !important; margin: 14px auto !important; }
   .mo-hl-layer { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
-  @media (prefers-color-scheme: dark) { .mo-hl-layer { mix-blend-mode: screen; } }
+  :root[data-mode="dark"] .mo-hl-layer { mix-blend-mode: screen; }
+  /* 深色模式下把 PDF 页面反色（保留色相），夜里读不刺眼 */
+  :root[data-mode="dark"] .pdfViewer .canvasWrapper { filter: invert(.88) hue-rotate(180deg); }
+  :root[data-mode="dark"] .pdfViewer .page { background: #111 !important; }
   .mo-hl { position: absolute; border-radius: 2px; }
   .epub-view { position: absolute; inset: 0; }
   .nav-zone { position: absolute; top: 0; bottom: 0; width: 44px; z-index: 2; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; border: 0; background: none; font-size: 22px; color: var(--ink-3); }
@@ -68,10 +73,32 @@
   #popover .replies { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
   #popover .reply { display: flex; gap: 6px; font-size: 13px; }
   #popover .actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .presence { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); white-space: nowrap; padding: 0 6px; }
+  .dot-status { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .5; }
+  .dot-status.on { background: var(--ok); opacity: 1; }
+  .outline { margin-bottom: 14px; }
+  .outline-title { font-weight: 600; cursor: pointer; display: flex; gap: 8px; padding: 4px 0; }
+  .outline-title .num { margin-left: auto; font-size: 11px; color: var(--ink-3); font-weight: 400; }
+  .outline ol { margin: 2px 0; padding-left: 1.4em; }
+  .outline li { margin: 4px 0; }
+  .outline details summary { font-size: 11px; color: var(--ink-3); cursor: pointer; }
+  .outline .quote { cursor: pointer; }
+  .link-btn { border: 0; background: none; color: var(--accent); padding: 4px 0; font-size: 12px; }
+  .link-btn:hover { text-decoration: underline; }
+  .hit { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.6; }
+  .hit:hover { background: var(--paper); }
+  .hit .num { display: block; font-size: 11px; color: var(--ink-3); }
+  .hit mark { background: var(--accent-soft); color: var(--ink); border-radius: 2px; }
+  .mem { font-size: 13px; padding: 5px 0; border-top: 1px dashed var(--line); }
+  .mem time { font-size: 11px; color: var(--ink-3); }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); margin-right: 6px; }
+  .card.summary { border-color: var(--accent-soft); }
+  .tabs button { font-size: 13px; }
   .empty { color: var(--ink-3); text-align: center; padding: 30px 10px; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); }
 
   @media (max-width: 860px) {
+    .presence { display: none; }
     aside { position: fixed; right: 0; top: 45px; bottom: 0; width: min(360px, 92vw); z-index: 40; box-shadow: var(--shadow); }
   }
 </style>
@@ -87,6 +114,10 @@
   <button class="icon-btn" id="zoomFit" title="适应宽度 / 默认字号">⤢</button>
   <button class="icon-btn" id="zoomIn" title="放大">A+</button>
   <button class="icon-btn" id="flow" title="翻页 / 滚动" hidden>翻页</button>
+  <span class="presence" id="presence"></span>
+  <button class="icon-btn" id="searchBtn" title="在书中查找">⌕</button>
+  <button class="icon-btn" id="bookmark" title="书签">☆</button>
+  <button class="icon-btn" id="theme" title="主题">◐</button>
   <button class="icon-btn" id="toggleSide" title="侧栏">☰</button>
 </header>
 <main>
@@ -98,6 +129,7 @@
     <button data-tab="ann">批注</button>
     <button data-tab="notes">笔记</button>
     <button data-tab="chat">伴读</button>
+    <button data-tab="search">查找</button>
   </div>
   <div class="panel" id="panel"></div>
   <div class="composer" id="composer" hidden>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知 · 足迹</title>
+<link rel="icon" href="/favicon.svg">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/nav.js"></script>
+<style>
+  h2 { font: 600 17px var(--serif); margin: 34px 0 6px; }
+  .sub { color: var(--ink-3); font-size: 13px; margin-bottom: 14px; }
+  .hero { font: 18px/1.7 var(--serif); color: var(--ink-2); margin: 6px 0 18px; }
+  .hero b { color: var(--ink); font-size: 26px; font-weight: 600; margin: 0 2px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .v { font: 600 24px/1.2 var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 13px; font-weight: 400; color: var(--ink-2); margin-left: 2px; }
+  .tile .k { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-top: 12px; }
+  .panel h3 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-2); }
+  .scroll { overflow-x: auto; }
+  svg text { fill: var(--ink-3); font-size: 10px; font-family: var(--sans); }
+  .hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 96px; align-items: end; border-bottom: 1px solid var(--line); }
+  .hours .col { height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+  .hours i { display: block; width: min(18px, 80%); background: var(--accent); border-radius: 4px 4px 0 0; }
+  .hours .col:hover i { opacity: .75; }
+  .hours-axis { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; font-size: 10px; color: var(--ink-3); text-align: center; margin-top: 3px; }
+  .cell { stroke: var(--surface); stroke-width: 2; }
+  .legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-3); margin-top: 8px; justify-content: flex-end; }
+  .legend i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+  .books .row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr auto; gap: 10px; align-items: center; padding: 5px 0; cursor: pointer; }
+  .books .row:hover .name { color: var(--accent); }
+  .books .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .books .track { height: 10px; border-radius: 0 4px 4px 0; }
+  .books .track i { display: block; height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .books .num { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .timeline { margin-top: 12px; }
+  .day { display: grid; grid-template-columns: 92px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .day .date { font-weight: 600; }
+  .day .date small { display: block; font-weight: 400; color: var(--ink-3); font-size: 12px; }
+  .ev { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
+  .ev time { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; width: 38px; }
+  .ev .ic { flex: none; width: 18px; text-align: center; }
+  .ev a { color: var(--ink); }
+  .ev .muted { font-size: 12px; }
+  .empty { color: var(--ink-3); text-align: center; padding: 30px 0; }
+  @media (max-width: 600px) { .day { grid-template-columns: 1fr; gap: 4px; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>足迹</h1>
+    <div class="chips" id="period" style="display:flex;gap:6px"></div>
+    <span style="flex:1"></span>
+    <nav class="topnav" id="topnav"></nav>
+  </div>
+  <div id="root"><div class="empty">加载中…</div></div>
+</div>
+<div class="tooltip" id="tip" hidden></div>
+<script type="module">
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const dur = s => s < 60 ? `${Math.round(s)} 秒` : s < 3600 ? `${Math.round(s / 60)} 分钟` : `${(s / 3600).toFixed(s < 36000 ? 1 : 0)} 小时`
+const durTile = s => s < 3600 ? [Math.round(s / 60), '分钟'] : [(s / 3600).toFixed(s < 36000 ? 1 : 0), '小时']
+const hm = iso => new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+const WEEK = '日一二三四五六'
+const dayLabel = (day, today) => {
+  const d = new Date(`${day}T12:00:00`)
+  const diff = Math.round((Date.parse(`${today}T12:00:00`) - d) / 86400000)
+  return [diff === 0 ? '今天' : diff === 1 ? '昨天' : `${d.getMonth() + 1}月${d.getDate()}日`, `周${WEEK[d.getDay()]}`]
+}
+
+let period = '30'
+try { period = localStorage.getItem('moread.statsPeriod') || '30' } catch {}
+const PERIODS = [['7', '近 7 天'], ['30', '近 30 天'], ['all', '全部']]
+function renderPeriod() {
+  $('#period').innerHTML = PERIODS.map(([k, l]) => `<button class="chip${k === period ? ' on' : ''}" data-p="${k}">${l}</button>`).join('')
+}
+$('#period').onclick = e => {
+  const p = e.target.closest('[data-p]')?.dataset.p
+  if (!p) return
+  period = p
+  try { localStorage.setItem('moread.statsPeriod', p) } catch {}
+  load()
+}
+
+// ---- 悬停提示 ----
+const tip = $('#tip')
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('[data-tip]')
+  if (!t) return (tip.hidden = true)
+  tip.textContent = t.dataset.tip
+  tip.hidden = false
+})
+document.addEventListener('mousemove', e => {
+  if (tip.hidden) return
+  const w = tip.offsetWidth
+  tip.style.left = `${Math.min(e.clientX + 12, innerWidth - w - 8)}px`
+  tip.style.top = `${e.clientY - 34}px`
+})
+
+// 24 小时柱状图（单一系列，无图例；标题说明是什么）。用 HTML 画，缩放时文字不变形
+function hourBars(values, fmt) {
+  const max = Math.max(...values, 1)
+  return `<div class="hours">${values.map((v, h) => `<div class="col" data-tip="${h}:00–${h + 1}:00 · ${fmt(v)}"><i style="height:${v ? Math.max(3, (v / max) * 100) : 0}%"></i></div>`).join('')}</div>
+    <div class="hours-axis">${Array.from({ length: 24 }, (_, h) => `<span>${h % 6 === 0 || h === 23 ? h : ''}</span>`).join('')}</div>`
+}
+
+// 阅读热力图：近 26 周，顺序色阶 seq-0..4
+const LEVELS = [[0, '没读'], [1, '15 分钟内'], [900, '15–30 分钟'], [1800, '30–60 分钟'], [3600, '1 小时以上']]
+const level = s => s <= 0 ? 0 : s < 900 ? 1 : s < 1800 ? 2 : s < 3600 ? 3 : 4
+function heatmap(cells) {
+  const C = 13
+  const first = new Date(`${cells[0][0]}T12:00:00`).getDay()
+  const items = cells.map(([day, s], i) => {
+    const k = i + first
+    const x = Math.floor(k / 7) * C + 22, y = (k % 7) * C + 14
+    return `<rect class="cell" x="${x}" y="${y}" width="${C}" height="${C}" rx="3" fill="var(--seq-${level(s)})" data-tip="${day} · ${s ? dur(s) : '没读'}"/>`
+  }).join('')
+  const months = []
+  cells.forEach(([day], i) => {
+    if (day.endsWith('-01') || i === 0) months.push(`<text x="${Math.floor((i + first) / 7) * C + 22}" y="10">${Number(day.slice(5, 7))}月</text>`)
+  })
+  const wd = [1, 3, 5].map(d => `<text x="0" y="${d * C + 24}">${WEEK[d]}</text>`).join('')
+  const weeks = Math.ceil((cells.length + first) / 7)
+  return `<div class="scroll"><svg width="${weeks * C + 26}" height="${7 * C + 16}">${months.join('')}${wd}${items}</svg></div>
+    <div class="legend">少${LEVELS.map(([, l], i) => `<i style="background:var(--seq-${i})" title="${l}" data-tip="${l}"></i>`).join('')}多</div>`
+}
+
+const tiles = list => `<div class="tiles">${list.map(([v, unit, k]) => `<div class="tile"><div class="v">${v}${unit ? `<small>${unit}</small>` : ''}</div><div class="k">${k}</div></div>`).join('')}</div>`
+
+function timeline(days, titles, today) {
+  if (!days.length) return '<div class="empty">这段时间还没有一起读书的记录。</div>'
+  const book = id => id && titles[id] ? `<a href="/reader.html?id=${id}">《${esc(titles[id])}》</a>` : ''
+  const ev = e => {
+    const t = `<time>${hm(e.at)}</time>`
+    switch (e.type) {
+      case 'first': return `<div class="ev">${t}<span class="ic">✦</span><span>第一次和 Claude 聊书${e.bookId ? `，在读${book(e.bookId)}` : ''}</span></div>`
+      case 'session': return `<div class="ev">${t}<span class="ic">💬</span><span>${e.bookId ? `一起读${book(e.bookId)}` : '聊了聊'}，交流 ${e.rounds} 轮${e.firstMeeting ? ' · 第一次一起读这本' : ''}<span class="muted">${e.sources.includes('terminal') ? ' · 终端' : ''}${e.sources.includes('reader') ? ' · 阅读器' : ''}</span></span></div>`
+      case 'chapter': return `<div class="ev">${t}<span class="ic">✓</span><span>读完${book(e.bookId)}${e.title ? `「${esc(e.title)}」` : '一章'}</span></div>`
+      case 'marks': return `<div class="ev">${t}<span class="ic">✎</span><span>Claude 在${book(e.bookId)}留下${[e.annotations && `${e.annotations} 条批注`, e.notes && `${e.notes} 篇笔记`].filter(Boolean).join('、')}${e.proactive ? `<span class="muted">（其中 ${e.proactive} 条是随读时主动留的）</span>` : ''}</span></div>`
+      case 'milestone': return `<div class="ev">${t}<span class="ic">★</span><span>第 ${e.count} 轮交流</span></div>`
+      case 'memory': return `<div class="ev">${t}<span class="ic">◇</span><span>Claude 记住了：${esc(e.content)}<span class="muted"> · ${esc(e.kind)}</span></span></div>`
+    }
+    return ''
+  }
+  return `<div class="timeline">${days.map(d => {
+    const [a, b] = dayLabel(d.day, today)
+    return `<div class="day"><div class="date">${a}<small>${b}${d.readingSeconds ? ` · 读了 ${dur(d.readingSeconds)}` : ''}</small></div><div>${d.events.map(ev).join('')}</div></div>`
+  }).join('')}</div>`
+}
+
+async function load() {
+  renderPeriod()
+  const s = await (await fetch(`/api/stats?period=${period}`)).json()
+  const f = s.footprint, r = s.reading
+  const pname = PERIODS.find(p => p[0] === period)[1]
+  const hero = f.firstDay
+    ? `<div class="hero">认识 Claude 的第<b>${f.daysKnown}</b>天。${pname}一起读了<b>${f.books}</b>本书、交流<b>${f.rounds}</b>轮${f.peakDaypart ? `，最常在<b>${f.peakDaypart}</b>聊书` : ''}。</div>`
+    : '<div class="hero">还没有和 Claude 一起读过书。用「和Claude一起读.bat」打开，读的时候问它就好。</div>'
+  const [rv, ru] = durTile(r.seconds), [tv, tu] = durTile(f.readingSeconds)
+  $('#root').innerHTML = `
+    <h2>陪伴足迹</h2>
+    ${hero}
+    ${tiles([[f.rounds, '轮', '有效交流'], [f.activeDays, '天', '一起读书的日子'], [tv, tu, '一起读的书上花的时间'], [f.claudeAnnotations, '条', 'Claude 留的批注'], [f.claudeNotes, '篇', 'Claude 写的笔记'], [f.memories, '件', 'Claude 记住的事']])}
+    <div class="panel"><h3>一天中什么时候聊书（交流轮数）</h3>${hourBars(f.roundsByHour, v => `${v} 轮`)}</div>
+    <div class="panel"><h3>时间线</h3>${timeline(f.days, s.titles, s.today)}</div>
+
+    <h2>阅读统计</h2>
+    <div class="sub">只计算窗口在前台、最近 3 分钟内有操作的时间。</div>
+    ${tiles([[rv, ru, `${pname}阅读`], [r.daysRead, '天', `${pname}读过书的日子`], [r.streak, '天', '当前连续'], [r.longestStreak, '天', '最长连续'], [r.totalDaysRead, '天', '累计读书日']])}
+    <div class="panel"><h3>近半年每天读了多久</h3>${heatmap(r.heatmap)}</div>
+    <div class="panel"><h3>一天中什么时候读书（阅读时长）</h3>${hourBars(r.hours, dur)}</div>
+    <div class="panel books"><h3>每本书花的时间</h3>${r.perBook.length ? (() => {
+      const max = r.perBook[0].seconds
+      return r.perBook.map(b => `<div class="row" data-id="${b.id}" data-tip="${esc(b.title)} · ${dur(b.seconds)} · 读到 ${b.percent}%"><span class="name">${esc(b.title)}</span><span class="track"><i style="width:${(b.seconds / max) * 100}%"></i></span><span class="num">${dur(b.seconds)} · ${b.percent}%</span></div>`).join('')
+    })() : '<div class="empty">这段时间还没有读书记录。</div>'}</div>`
+}
+$('#root').addEventListener('click', e => {
+  const row = e.target.closest('.books .row')
+  if (row) location.href = `/reader.html?id=${row.dataset.id}`
+})
+load()
+</script>
+</body>
+</html>

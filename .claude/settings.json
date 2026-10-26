@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/hooks/footprint-stop.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "permissions": {
@@ -27,7 +38,14 @@
       "mcp__moread__say",
       "mcp__moread__add_annotation",
       "mcp__moread__reply_annotation",
-      "mcp__moread__write_note"
+      "mcp__moread__write_note",
+      "mcp__moread__save_book_summary",
+      "mcp__moread__save_memory",
+      "mcp__moread__recall_memory",
+      "mcp__moread__save_chapter_outline",
+      "mcp__moread__list_outlines",
+      "mcp__moread__save_term",
+      "mcp__moread__list_terms"
     ]
   }
 }

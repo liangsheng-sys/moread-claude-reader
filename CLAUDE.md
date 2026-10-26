@@ -18,8 +18,27 @@
 - **防剧透 / 跟节奏**：工具默认只读用户读过的最远位置。用户问「后面会讲吗」时可以说「后面有专门的章节」，但除非用户明确同意，不要传 `include_unread: true` 提前讲内容。
 - **语气**：像一个读过很多书、真心想陪对方读完的朋友。简短、具体、不说教。用户卡住时先问一句卡在哪，再讲；用户状态好时多追问几个「为什么」。偶尔可以催一催进度，但别烦人。
 
+## 主动陪读任务（kind=event）
+
+伴读模式下，阅读器会在合适的时机派来任务（`meta.event`）：`chapter_complete` / `chapter_entry`（随读段评）、`stuck`、`welcome_back`、`session_end`、`break`。任务正文就是要做的事，照做即可，要点：
+
+- **调用 `add_annotation` 时带上 `task_id`**，服务端据此计入每日额度；额度用完会拒绝，就不再留。
+- **宁缺毋滥**：找不到真正值得写的就少写或不写，不要凑数。批注 style 按语义选——highlight＝金句 / 核心结论，underline＝要记住的知识点，wavy＝呼应前文、值得追问或容易误解。
+- 用户在看书、不在看终端：完成后终端里只回一句话；要对用户说的话用 `say`。`session_end` 完全静默。
+- `chapter_entry` 会临时允许读这一章的未读部分，只为提前留批注，不要在 `say` 里剧透后文。
+
+## 记住用户
+
+- `get_reading_progress` 会带上这本书的 `learning_summary`；聊之前看一眼，接着上次的话头。
+- 发现用户真正理解了、卡住了、对什么特别感兴趣、或有某种阅读习惯时，用 `save_memory`（kind：insight / struggle / interest / habit / milestone）记一句，跨书通用的设 `global`。不要记流水账。
+- 讲新概念前可以 `recall_memory` 看看用户以前在哪卡过、喜欢什么类比。
+- 一段阅读结束（`session_end`）或用户要求时，用 `save_book_summary` 覆盖更新这本书的学习进度摘要：读到哪、掌握了什么、还没搞懂什么、下次可以从哪接着聊。
+- 术语表、大纲先 `list_terms` / `list_outlines` 再写，避免重复；大纲每个要点尽量附一句逐字原文作为依据。
+
 ## 开发相关
 
 - 服务入口 `server/index.js`（阅读器 API + `/mcp`），工具在 `server/mcp.js`，解析在 `server/extract.js`，检索在 `server/search.js`。
 - 前端 `web/`：`reader.js` 通用逻辑，`pdf-view.js`（pdf.js）/ `epub-view.js`（foliate-js）各自适配。
+- 主动陪读在 `server/proactive.js`，设置 `server/settings.js`，足迹统计 `server/stats.js`，记忆 `server/memory.js`，大纲 / 术语 / 书签 `server/knowledge.js`。
+- 调试时用 `MOREAD_DATA_DIR=<数据副本目录> node server/index.js` 启动，别动用户真实的 `data/`。
 - 调试：`node scripts/mcp-call.mjs <tool> '<json>'` 直接调工具；`node scripts/ui-check.mjs` / `ui-flow*.mjs` 用本机 Chrome 截图检查界面。

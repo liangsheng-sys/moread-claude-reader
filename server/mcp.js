@@ -9,6 +9,7 @@ import { getSettings } from './settings.js'
 import { chapterAt, quotaStatus, readPermit, useAnnotationQuota } from './proactive.js'
 import { getBookSummary, MEMORY_KINDS, recallMemories, saveBookSummary, saveMemory } from './memory.js'
 import { listOutlines, listTerms, saveOutline, saveTerm } from './knowledge.js'
+import { renderPdfPage } from './render.js'
 
 const MAX_READ_CHARS = 8000
 
@@ -84,7 +85,7 @@ export function createMcpServer() {
       pending_questions: store.pendingInbox({ questionsOnly: true }).length,
       proactive_quota_today: (({ annotations, annotationMax }) => `主动批注 ${annotations}/${annotationMax}`)(quotaStatus()),
       scanned_pdf: meta.scanned || undefined,
-      tip: meta.format === 'pdf' ? '需要看页面上的图/公式/代码截图时，用 Read 工具读取 file 并传 pages 参数。' : undefined,
+      tip: meta.format === 'pdf' ? '需要看页面上的图/公式/代码截图时，用 view_page 看整页，小图用 region 放大。' : undefined,
     })
   })
 
@@ -129,7 +130,7 @@ export function createMcpServer() {
     if (end > scope.max) more += `\n（${sectionName(r.meta, scope.max + 1)} 之后用户还没读到，已省略）`
     const imgs = picked.filter(s => s.images)
     if (imgs.length) more += r.meta.format === 'pdf'
-      ? `\n\n要看图：Read 工具读取 "${getBook(r.id).file}"，pages: "${imgs.map(s => s.index).join(',')}"`
+      ? `\n\n要看图：view_page 工具，page 取 ${imgs.map(s => s.index).join(' / ')}`
       : `\n\n要看图：get_image 工具，section 取 ${imgs.map(s => s.index).join(' / ')}`
     return text(body + more)
   })
@@ -178,12 +179,12 @@ export function createMcpServer() {
   })
 
   server.registerTool('get_image', {
-    description: 'EPUB：返回某一节里的第 n 张图片，供你直接看图。（PDF 请用 Read 工具读页面。）',
+    description: 'EPUB：返回某一节里的第 n 张图片，供你直接看图。（PDF 请用 view_page。）',
     inputSchema: { ...bookArg, section: z.number().int(), n: z.number().int().min(1).optional().describe('第几张，默认 1') },
   }, async ({ book_id, section, n = 1 }) => {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
-    if (r.meta.format !== 'epub') return fail(`PDF 请用 Read 工具读取 "${getBook(r.id).file}"，pages: "${section}"。`)
+    if (r.meta.format !== 'epub') return fail(`PDF 请用 view_page，page: ${section}。`)
     const s = loadBook(r.id).sections[section]
     const p = s?.imagePaths?.[n - 1]
     if (!p) return fail(`第 ${section} 节没有第 ${n} 张图（共 ${s?.imagePaths?.length ?? 0} 张）。`)
@@ -191,6 +192,32 @@ export function createMcpServer() {
     if (!img) return fail('图片读取失败。')
     if (img.mime === 'image/svg+xml') return text(Buffer.from(img.data, 'base64').toString('utf8').slice(0, 6000))
     return { content: [{ type: 'image', data: img.data, mimeType: img.mime }, { type: 'text', text: `${sectionName(r.meta, section)} 第 ${n}/${s.imagePaths.length} 张：${p}` }] }
+  })
+
+  server.registerTool('view_page', {
+    description: 'PDF：把一页渲染成图片给你看（示意图、公式、代码截图、版式）。先看整页；图太小看不清时，用 region 只渲染其中一块，等于放大。',
+    inputSchema: {
+      ...bookArg, ...unreadArg,
+      page: z.number().int().min(1).describe('页码（从 1 开始）'),
+      region: z.object({
+        x: z.number().min(0).max(1), y: z.number().min(0).max(1),
+        w: z.number().min(0.02).max(1), h: z.number().min(0.02).max(1),
+      }).optional().describe('只看页面的一部分：左上角 (x, y) 和宽高 (w, h)，都是相对整页的比例，如右下四分之一为 {x:0.5,y:0.5,w:0.5,h:0.5}'),
+      detail: z.enum(['normal', 'high']).optional().describe('high 输出更大的图（更占上下文），默认 normal'),
+    },
+  }, async ({ book_id, page, region, detail = 'normal', include_unread }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    if (r.meta.format !== 'pdf') return fail('EPUB 请用 get_image（read_book_section 会标出哪一节有图）。')
+    const scope = scopeOf(r.id, r.meta, include_unread)
+    if (page > scope.max) return fail(`${sectionName(r.meta, page)} 用户还没读到（最远读到 ${sectionName(r.meta, scope.furthest)}）。如用户同意剧透，可传 include_unread: true。`)
+    try {
+      const img = await renderPdfPage(getBook(r.id).file, page, { region, maxSide: detail === 'high' ? 2000 : 1400 })
+      const part = region ? `（区域 x=${region.x} y=${region.y} w=${region.w} h=${region.h}）` : ''
+      return { content: [{ type: 'image', data: img.data, mimeType: img.mimeType }, { type: 'text', text: `${sectionName(r.meta, page)}${part} · ${img.width}×${img.height}` }] }
+    } catch (e) {
+      return fail(`渲染失败：${e.message}`)
+    }
   })
 
   server.registerTool('list_annotations', {

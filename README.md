@@ -54,7 +54,8 @@
 | `list_chapters` / `read_book_section` | 目录（标已读）、读原文 |
 | `search_book` | 语义向量 + BM25 词法混合检索（RRF 融合） |
 | `grep_book` | 字面 / 正则精确查找 |
-| `get_image` | 看 EPUB 里的图（PDF 由 Claude 直接读页面） |
+| `view_page` | 把 PDF 某页渲染成图片给 Claude 看，可只看一块（放大小图）；不需要装 poppler |
+| `get_image` | 看 EPUB 里的图 |
 | `list_annotations` / `add_annotation` / `reply_annotation` | 批注与讨论 |
 | `list_notes` / `write_note` | 读书笔记 |
 | `say` / `get_questions` | 在阅读器侧栏说话 / 取阅读器里发来的消息 |
@@ -84,7 +85,7 @@
 
 ## 已知限制
 
-- 扫描版 PDF 没有文字层：不能检索、不能划线，但 Claude 仍可以直接看页面图片。
+- 扫描版 PDF 没有文字层：不能检索、不能划线，但 Claude 仍可以用 `view_page` 看页面图片。
 - 伴读模式下 Claude 每 30 分钟会重启一次监听（Monitor 的时长上限），会占用极少量用量。
 - `server/channel.js` 是基于 Claude Code channels（研究预览）的旧方案，很多账号尚未开放，会被 Claude Code 静默丢弃，目前不再使用。
 - 只监听 `127.0.0.1`，局域网其他设备访问不到。

@@ -40,5 +40,5 @@
 - 服务入口 `server/index.js`（阅读器 API + `/mcp`），工具在 `server/mcp.js`，解析在 `server/extract.js`，检索在 `server/search.js`。
 - 前端 `web/`：`reader.js` 通用逻辑，`pdf-view.js`（pdf.js）/ `epub-view.js`（foliate-js）各自适配。
 - 主动陪读在 `server/proactive.js`，设置 `server/settings.js`，足迹统计 `server/stats.js`，记忆 `server/memory.js`，大纲 / 术语 / 书签 `server/knowledge.js`。
-- 调试时用 `MOREAD_DATA_DIR=<数据副本目录> node server/index.js` 启动，别动用户真实的 `data/`。
+- 调试时用 `MOREAD_DATA_DIR=<数据副本目录> MOREAD_PORT=18848 node server/index.js` 启动，别动用户真实的 `data/`。**一定要换端口**：伴读监听会在 8848 上的服务停掉后立刻用真实数据重新拉起，测试请求会打进真实记录。
 - 调试：`node scripts/mcp-call.mjs <tool> '<json>'` 直接调工具；`node scripts/ui-check.mjs` / `ui-flow*.mjs` 用本机 Chrome 截图检查界面。

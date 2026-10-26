@@ -2,6 +2,11 @@
 
 版本号规则：`主版本.功能版本.修复版本`。加了新功能升中间一位，只修 bug 升最后一位。
 
+## 0.3.0 · 2026-10-26
+
+- 新增 `view_page` 工具：服务端用 pdf.js 把 PDF 页面渲染成图片交给 Claude，可用 `region` 只看页面一块（放大小图、公式、代码截图）。不需要安装 poppler，也遵守防剧透范围。此前 Claude 用自带 Read 工具看 PDF 页面，但它依赖 poppler 的 pdftoppm，本机没有，所以看不到图。（MoRead 本身不支持 PDF，没有可借鉴的做法。）
+- `read_book_section`、`get_reading_progress` 的看图提示改为 `view_page`；伴读约定里要求被问到图时先看图再回答。
+
 ## 0.2.1 · 2026-10-26
 
 - 修复：伴读模式下「问 Claude」没有任何反应。原因是 Claude Code 的 channels 功能在本账号尚未开放，消息被静默丢弃，而桥接程序仍把它们标成了已读。改为由 Claude 用 Monitor 工具运行 `scripts/watch.mjs` 监听阅读器（`/companion`），不再依赖 channels。被吞掉的那条提问已恢复为未读。

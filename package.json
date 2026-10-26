@@ -1,0 +1,28 @@
+{
+  "name": "moread-desk",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server/index.js",
+    "fetch-model": "node scripts/fetch-model.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^4.22.3",
+    "fflate": "^0.8.3",
+    "marked": "^15.0.12",
+    "node-html-parser": "^9.0.5",
+    "pdfjs-dist": "^4.10.38",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

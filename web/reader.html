@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 1fr auto; height: 100vh; overflow: hidden; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface); min-width: 0; }
+  header .title { font: 600 15px var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .where { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  header .grow { flex: 1; }
+  #progressBar { position: absolute; left: 0; right: 0; top: 0; height: 2px; }
+  #progressBar i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  main { position: relative; overflow: hidden; min-width: 0; }
+  #stage { position: absolute; inset: 0; }
+  .pdf-container { position: absolute; inset: 0; overflow: auto; background: var(--paper); }
+  .pdfViewer .page { box-shadow: 0 2px 10px rgba(0,0,0,.12); border: 0 !important; margin: 14px auto !important; }
+  .mo-hl-layer { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
+  @media (prefers-color-scheme: dark) { .mo-hl-layer { mix-blend-mode: screen; } }
+  .mo-hl { position: absolute; border-radius: 2px; }
+  .epub-view { position: absolute; inset: 0; }
+  .nav-zone { position: absolute; top: 0; bottom: 0; width: 44px; z-index: 2; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; border: 0; background: none; font-size: 22px; color: var(--ink-3); }
+  .nav-zone:hover { opacity: 1; }
+  .nav-zone.left { left: 0; } .nav-zone.right { right: 0; }
+
+  aside { width: 360px; border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+  aside[hidden] { display: none; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; border: 0; background: none; padding: 10px 0; color: var(--ink-3); border-bottom: 2px solid transparent; position: relative; }
+  .tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .tabs .dot { position: absolute; top: 8px; margin-left: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .panel { flex: 1; overflow-y: auto; padding: 12px 14px; min-height: 0; }
+  .toc-item { padding: 5px 8px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .toc-item:hover { background: var(--paper); }
+  .toc-item.current { background: var(--accent-soft); font-weight: 600; }
+  .toc-item .num { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+  .toc-item.read::before { content: "✓"; color: var(--accent); font-size: 11px; }
+  .chips { display: flex; gap: 6px; margin-bottom: 10px; }
+  .chip { border: 1px solid var(--line); background: none; border-radius: 14px; padding: 2px 10px; font-size: 12px; }
+  .chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; background: var(--surface); cursor: pointer; }
+  .card:hover { border-color: var(--ink-3); }
+  .card .head { display: flex; gap: 8px; font-size: 12px; color: var(--ink-3); margin-bottom: 4px; align-items: center; }
+  .quote { font: 13px/1.7 var(--serif); color: var(--ink-2); border-left: 3px solid var(--line); padding-left: 8px; margin: 4px 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .quote.full { -webkit-line-clamp: unset; }
+  .who { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--ink-2); }
+  .avatar { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; color: #fff; flex: none; }
+  .avatar.claude { background: var(--accent); }
+  .avatar.me { background: var(--me); }
+  .chat { display: flex; flex-direction: column; gap: 12px; }
+  .msg { display: flex; gap: 8px; }
+  .msg .body { flex: 1; min-width: 0; }
+  .msg.me .body { background: var(--paper); border-radius: 10px; padding: 6px 10px; }
+  .msg time { font-size: 11px; color: var(--ink-3); }
+  .composer { border-top: 1px solid var(--line); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .composer .row { display: flex; gap: 6px; align-items: center; }
+  .hint { font-size: 12px; color: var(--ink-3); }
+
+  #selbar, #popover { position: fixed; z-index: 50; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+  #selbar { display: flex; flex-direction: column; padding: 4px; gap: 4px; }
+  #selbar .row { display: flex; align-items: center; gap: 2px; }
+  #selbar .sw { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--surface); outline: 1px solid var(--line); margin: 0 3px; padding: 0; }
+  #selbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+  #selbar .ask { width: 300px; padding: 4px; display: flex; flex-direction: column; gap: 6px; }
+  #popover { width: 340px; max-height: 60vh; overflow-y: auto; padding: 12px 14px; }
+  #popover .replies { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+  #popover .reply { display: flex; gap: 6px; font-size: 13px; }
+  #popover .actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .empty { color: var(--ink-3); text-align: center; padding: 30px 10px; }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); }
+
+  @media (max-width: 860px) {
+    aside { position: fixed; right: 0; top: 45px; bottom: 0; width: min(360px, 92vw); z-index: 40; box-shadow: var(--shadow); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div id="progressBar"><i></i></div>
+  <a class="icon-btn" href="/" title="返回书库">← 书库</a>
+  <span class="title" id="title"></span>
+  <span class="where" id="where"></span>
+  <span class="grow"></span>
+  <button class="icon-btn" id="zoomOut" title="缩小">A−</button>
+  <button class="icon-btn" id="zoomFit" title="适应宽度 / 默认字号">⤢</button>
+  <button class="icon-btn" id="zoomIn" title="放大">A+</button>
+  <button class="icon-btn" id="flow" title="翻页 / 滚动" hidden>翻页</button>
+  <button class="icon-btn" id="toggleSide" title="侧栏">☰</button>
+</header>
+<main>
+  <div id="stage"><div class="loading">正在打开…</div></div>
+</main>
+<aside id="side">
+  <div class="tabs" id="tabs">
+    <button data-tab="toc">目录</button>
+    <button data-tab="ann">批注</button>
+    <button data-tab="notes">笔记</button>
+    <button data-tab="chat">伴读</button>
+  </div>
+  <div class="panel" id="panel"></div>
+  <div class="composer" id="composer" hidden>
+    <textarea id="chatInput" rows="2" placeholder="和 Claude 说点什么…（Ctrl+Enter 发送）"></textarea>
+    <div class="row"><span class="hint" id="chatHint"></span><span style="flex:1"></span><button class="btn primary" id="chatSend">发送</button></div>
+  </div>
+</aside>
+<div id="selbar" hidden></div>
+<div id="popover" hidden></div>
+<script type="module" src="/reader.js"></script>
+</body>
+</html>

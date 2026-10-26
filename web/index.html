@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知 · 书库</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font: 600 26px var(--serif); margin: 0; letter-spacing: .05em; }
+  .lib-path { font-size: 12px; }
+  .continue { display: flex; gap: 20px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 20px 0 28px; cursor: pointer; }
+  .continue:hover { box-shadow: var(--shadow); }
+  .continue .cover { width: 72px; flex: none; padding: .6em 0; }
+  .continue h2 { font: 600 18px var(--serif); margin: 0 0 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 28px 22px; }
+  .book { cursor: pointer; }
+  .cover { aspect-ratio: 3 / 4; border-radius: 4px 8px 8px 4px; position: relative; overflow: hidden; box-shadow: 2px 3px 10px rgba(0,0,0,.15), inset 6px 0 8px -6px rgba(0,0,0,.35); display: flex; justify-content: center; padding: 1.2em 0; transition: transform .15s; }
+  .book:hover .cover { transform: translateY(-3px); }
+  .cover .t { writing-mode: vertical-rl; font: 600 17px/1.3 var(--serif); letter-spacing: .12em; color: rgba(255,255,255,.92); max-height: 100%; overflow: hidden; }
+  .cover .fmt { position: absolute; right: 8px; bottom: 6px; font-size: 10px; letter-spacing: .1em; color: rgba(255,255,255,.7); text-transform: uppercase; }
+  .continue .cover .t { font-size: 12px; }
+  .meta { margin-top: 8px; }
+  .meta .name { font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .status { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+  .empty { text-align: center; padding: 80px 20px; color: var(--ink-2); }
+  .empty code { background: var(--surface); border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>墨知 · 书库</h1>
+    <span class="lib-path muted" id="libPath"></span>
+    <span style="flex:1"></span>
+    <button class="btn" id="rescan">重新扫描</button>
+  </header>
+  <div id="continue"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<script type="module">
+const $ = s => document.querySelector(s)
+const palette = ['#6b4f3a', '#3d5a6c', '#5b4a7a', '#4a6b52', '#7a4a4a', '#5a5a3d', '#3d4f6b', '#6b3d5a']
+const hue = s => palette[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % palette.length]
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+const cover = b => `<div class="cover" style="background:linear-gradient(160deg, ${hue(b.title)}, #222 160%)"><span class="t">${esc(b.title.replace(/\.(pdf|epub)$/i, '').slice(0, 24))}</span><span class="fmt">${b.format}</span></div>`
+const pct = b => Math.round((b.progress?.fraction ?? 0) * 100)
+const statusText = b => {
+  const s = b.status
+  if (s.stage === 'queued') return '等待解析'
+  if (s.stage === 'extracting') return '解析中…'
+  if (s.stage === 'embedding') return `建立语义索引 ${s.done}/${s.total}`
+  if (s.stage === 'error') return '解析失败：' + s.error
+  if (b.scanned) return '扫描版 · 无文字层'
+  return b.progress ? `读到 ${pct(b)}%` : '未开始'
+}
+
+async function render() {
+  const { books, libraryDir } = await (await fetch('/api/books')).json()
+  $('#libPath').textContent = libraryDir
+  const recent = books.find(b => b.progress)
+  $('#continue').innerHTML = recent ? `<div class="continue" data-id="${recent.id}">${cover(recent)}<div style="flex:1"><div class="muted" style="font-size:12px">继续阅读</div><h2>${esc(recent.title)}</h2><div class="muted">${esc([recent.progress.tocLabel, recent.progress.label].filter(Boolean).join(' · '))}</div><div class="bar" style="max-width:320px"><i style="width:${pct(recent)}%"></i></div></div></div>` : ''
+  $('#grid').innerHTML = books.length ? books.map(b => `<div class="book" data-id="${b.id}">${cover(b)}<div class="meta"><div class="name">${esc(b.title)}</div>${b.author ? `<div class="muted" style="font-size:12px">${esc(b.author)}</div>` : ''}<div class="bar"><i style="width:${pct(b)}%"></i></div><div class="status">${esc(statusText(b))}</div></div></div>`).join('')
+    : `<div class="empty" style="grid-column:1/-1">书库是空的。把 PDF / EPUB 放进 <code>${esc(libraryDir)}</code>，然后点「重新扫描」。</div>`
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-id]')
+  if (el) location.href = `/reader.html?id=${el.dataset.id}`
+})
+$('#rescan').onclick = async () => { await fetch('/api/rescan', { method: 'POST' }); render() }
+let t
+new EventSource('/api/events').onmessage = e => {
+  if (JSON.parse(e.data).type === 'book') { clearTimeout(t); t = setTimeout(render, 300) }
+}
+render()
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "port": 8848,
+  "libraryDir": "../书库",
+  "dataDir": "./data",
+  "spoilerGuard": true,
+  "embedding": {
+    "enabled": true,
+    "model": "Xenova/multilingual-e5-small",
+    "dtype": "q8"
+  }
+}

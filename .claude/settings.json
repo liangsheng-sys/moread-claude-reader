@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/hooks/reading-context.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__moread__list_books",
+      "mcp__moread__get_reading_progress",
+      "mcp__moread__list_chapters",
+      "mcp__moread__read_book_section",
+      "mcp__moread__search_book",
+      "mcp__moread__grep_book",
+      "mcp__moread__get_image",
+      "mcp__moread__list_annotations",
+      "mcp__moread__list_notes",
+      "mcp__moread__get_questions",
+      "mcp__moread__say",
+      "mcp__moread__add_annotation",
+      "mcp__moread__reply_annotation",
+      "mcp__moread__write_note"
+    ]
+  }
+}

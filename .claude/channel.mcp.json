@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "moread-channel": {
+      "command": "node",
+      "args": ["server/channel.js"]
+    }
+  }
+}

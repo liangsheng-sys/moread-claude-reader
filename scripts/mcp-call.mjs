@@ -1,7 +1,7 @@
 // 调试用：node scripts/mcp-call.mjs <tool> '<json args>'
 const [tool, args = '{}'] = process.argv.slice(2)
 const call = async (method, params, id = 1) => {
-  const res = await fetch('http://127.0.0.1:8848/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) })
+  const res = await fetch(`http://127.0.0.1:${process.env.MOREAD_PORT || 8848}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) })
   return res.json()
 }
 if (!tool) {

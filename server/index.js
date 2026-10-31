@@ -16,6 +16,7 @@ import { deleteMemory, getBookSummary, listMemories, MEMORY_KINDS } from './memo
 import * as knowledge from './knowledge.js'
 import { grep } from './search.js'
 import { exportBookMarkdown } from './export.js'
+import { formatInboxItem } from './inbox.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const config = {
@@ -315,13 +316,8 @@ app.get('/api/inbox/pending', (req, res) => {
       if (i.taskId) meta.task_id = i.taskId
       return { id: i.id, content: i.text, meta }
     }
-    const b = getBook(i.bookId)
-    const where = b?.meta ? `《${b.meta.title}》${i.section != null ? `第${i.section}${unitOf(b)}` : ''}` : '阅读器'
-    const lines = [{ ask: `在${where}选中了一段问你：`, message: `在${where}给你留言：`, reply: `回复了你在${where}的批注：` }[i.kind] ?? where]
-    if (i.quote) lines.push(`> ${i.quote.replace(/\n/g, '\n> ')}`)
-    lines.push(i.text || '（没写问题，请讲讲这段）')
     if (i.annotationId) meta.annotation_id = i.annotationId
-    return { id: i.id, content: lines.join('\n'), meta }
+    return { id: i.id, content: formatInboxItem(i), meta }
   }))
 })
 app.post('/api/inbox/ack', (req, res) => {

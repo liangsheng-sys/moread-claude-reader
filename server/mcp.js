@@ -10,6 +10,7 @@ import { chapterAt, quotaStatus, readPermit, useAnnotationQuota } from './proact
 import { getBookSummary, MEMORY_KINDS, recallMemories, saveBookSummary, saveMemory } from './memory.js'
 import { listOutlines, listTerms, saveOutline, saveTerm } from './knowledge.js'
 import { renderPdfPage } from './render.js'
+import { formatInboxItem } from './inbox.js'
 
 const MAX_READ_CHARS = 8000
 
@@ -221,15 +222,21 @@ export function createMcpServer() {
   })
 
   server.registerTool('list_annotations', {
-    description: '列出书中的划线和批注（用户的和你的），含讨论回复。',
-    inputSchema: { ...bookArg, from: z.number().int().optional(), to: z.number().int().optional(), author: z.enum(['me', 'claude']).optional().describe('me=用户, claude=你') },
-  }, async ({ book_id, from, to, author }) => {
+    description: '列出书中的划线和批注（用户的和你的），含讨论回复。用户自己的批注里常写着他的想法和练习答案：对答案、复习、用户提到「我之前写过」时先查这里。',
+    inputSchema: {
+      ...bookArg, from: z.number().int().optional(), to: z.number().int().optional(),
+      author: z.enum(['me', 'claude']).optional().describe('me=用户, claude=你'),
+      query: z.string().optional().describe('只看原文、批注或讨论里含这个词的'),
+    },
+  }, async ({ book_id, from, to, author, query }) => {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
+    const q = query?.trim().toLowerCase()
     const list = store.listAnnotations(r.id)
       .filter(a => (from == null || a.section >= from) && (to == null || a.section <= to) && (!author || a.author === author))
+      .filter(a => !q || [a.quote, a.note, ...a.replies.map(x => x.text)].some(s => s?.toLowerCase().includes(q)))
       .sort((a, b) => a.section - b.section)
-    if (!list.length) return text('还没有划线或批注。')
+    if (!list.length) return text(q ? `没有含「${query}」的划线或批注。` : '还没有划线或批注。')
     return text(list.map(a => ({
       id: a.id, where: sectionName(r.meta, a.section), by: a.author === 'claude' ? '你' : '用户',
       quote: a.quote, note: a.note || undefined, style: a.style,
@@ -316,11 +323,10 @@ export function createMcpServer() {
   }, async () => {
     const items = store.takeInbox()
     if (!items.length) return text('没有新的提问。')
-    return text(items.map(i => {
-      const b = getBook(i.bookId)
-      const where = b?.meta ? `《${b.meta.title}》${i.section != null ? sectionName(b.meta, i.section) : ''}` : ''
-      return { kind: { ask: '选段提问', message: '面板留言', reply: '回复批注' }[i.kind] ?? i.kind, book_id: i.bookId, where, quote: i.quote, text: i.text, annotation_id: i.annotationId, at: i.at }
-    }))
+    return text(items.map(i => [
+      `[${{ ask: '选段提问', message: '面板留言', reply: '回复批注' }[i.kind] ?? i.kind} book_id=${i.bookId}${i.annotationId ? ` annotation_id=${i.annotationId}` : ''}]`,
+      formatInboxItem(i),
+    ].join('\n')).join('\n\n'))
   })
 
   // ---------- 记忆（对应 MoRead 的滚动剧情摘要 + 长期记忆） ----------

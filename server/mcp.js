@@ -119,8 +119,8 @@ export function createMcpServer() {
     if (from > scope.max) return fail(`${sectionName(r.meta, from)} 用户还没读到（最远读到 ${sectionName(r.meta, scope.furthest)}）。如用户同意剧透，可传 include_unread: true。`)
     const picked = sections.filter(s => s.index >= from && s.index <= Math.min(end, scope.max))
     let body = picked.map(s => {
-      const head = `【${sectionName(r.meta, s.index)}${s.label && r.meta.format === 'epub' ? ' · ' + s.label : ''}${s.images ? ` · 含 ${s.images} 张图` : ''}】`
-      return `${head}\n${s.text || '（本页没有文字层）'}`
+      const head = `【${sectionName(r.meta, s.index)}${s.label && r.meta.format === 'epub' ? ' · ' + s.label : ''}${s.images ? ` · 含 ${s.images} 张图` : ''}${s.ocr ? ' · 本机 OCR 识别，可能有错字' : ''}】`
+      return `${head}\n${s.text || '（本页没有文字层，也还没识别：用 view_page 看图）'}`
     }).join('\n\n')
     body = body.slice(offset)
     let more = ''

@@ -29,6 +29,8 @@
   .bar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--accent); }
   .status { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+  .ocr-btn { margin-top: 6px; font-size: 12px; border: 1px solid var(--accent); color: var(--accent); background: none; border-radius: 12px; padding: 1px 10px; }
+  .ocr-btn:hover { background: var(--accent-soft); }
   .empty { text-align: center; padding: 80px 20px; color: var(--ink-2); }
   .empty code { background: var(--surface); border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; }
 </style>
@@ -59,8 +61,22 @@ const statusText = b => {
   if (s.stage === 'extracting') return '解析中…'
   if (s.stage === 'embedding') return `建立语义索引 ${s.done}/${s.total}`
   if (s.stage === 'error') return '解析失败：' + s.error
-  if (b.scanned) return '扫描版 · 无文字层'
-  return b.progress ? `读到 ${pct(b)}%` : '未开始'
+  const read = b.progress ? `读到 ${pct(b)}%` : '未开始'
+  const o = b.ocr
+  if (!o) return read
+  if (o.stage === 'queued') return '排队等待识别文字'
+  if (o.stage === 'running') return `本机识别文字 ${o.done}/${o.total} 页`
+  if (o.stage === 'paused') return `已识别 ${o.done}/${b.sectionCount} 页 · 已暂停`
+  if (o.stage === 'error') return `识别失败：${o.error ?? ''}`
+  if (o.stage === 'done') return `${read} · 文字由本机识别`
+  return '扫描版 · 无文字层'
+}
+// 扫描版的识别按钮：文字识别全程在本机运行，不上传
+const ocrButton = b => {
+  const st = b.ocr?.stage
+  if (!st || st === 'done' || b.status.stage !== 'ready' && b.status.stage !== 'embedding') return ''
+  const [act, label] = { none: ['start', '识别文字'], paused: ['start', '继续识别'], error: ['start', '重试识别'], queued: ['stop', '取消'], running: ['stop', '暂停'] }[st]
+  return `<button class="ocr-btn" data-ocr="${act}" data-book="${b.id}" title="用本机的文字识别（RapidOCR）把扫描页转成文字，之后能查找、划线，Claude 也能直接读。不联网、不上传。">${label}</button>`
 }
 
 async function render() {
@@ -68,10 +84,17 @@ async function render() {
   $('#libPath').textContent = libraryDir
   const recent = books.find(b => b.progress)
   $('#continue').innerHTML = recent ? `<div class="continue" data-id="${recent.id}">${cover(recent)}<div style="flex:1"><div class="muted" style="font-size:12px">继续阅读</div><h2>${esc(recent.title)}</h2><div class="muted">${esc([recent.progress.tocLabel, recent.progress.label].filter(Boolean).join(' · '))}</div><div class="bar" style="max-width:320px"><i style="width:${pct(recent)}%"></i></div></div></div>` : ''
-  $('#grid').innerHTML = books.length ? books.map(b => `<div class="book" data-id="${b.id}">${cover(b)}<div class="meta"><div class="name">${esc(b.title)}</div>${b.author ? `<div class="muted" style="font-size:12px">${esc(b.author)}</div>` : ''}<div class="bar"><i style="width:${pct(b)}%"></i></div><div class="status">${esc(statusText(b))}</div></div></div>`).join('')
+  $('#grid').innerHTML = books.length ? books.map(b => `<div class="book" data-id="${b.id}">${cover(b)}<div class="meta"><div class="name">${esc(b.title)}</div>${b.author ? `<div class="muted" style="font-size:12px">${esc(b.author)}</div>` : ''}<div class="bar"><i style="width:${pct(b)}%"></i></div><div class="status">${esc(statusText(b))}</div>${ocrButton(b)}</div></div>`).join('')
     : `<div class="empty" style="grid-column:1/-1">书库是空的。把 PDF / EPUB 放进 <code>${esc(libraryDir)}</code>，然后点「重新扫描」。</div>`
 }
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
+  const ocr = e.target.closest('[data-ocr]')
+  if (ocr) {
+    e.stopPropagation()
+    ocr.disabled = true
+    await fetch(`/api/books/${ocr.dataset.book}/ocr`, { method: ocr.dataset.ocr === 'start' ? 'POST' : 'DELETE' })
+    return render()
+  }
   const el = e.target.closest('[data-id]')
   if (el) location.href = `/reader.html?id=${el.dataset.id}`
 })

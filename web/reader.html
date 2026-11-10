@@ -73,6 +73,12 @@
   #popover .replies { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
   #popover .reply { display: flex; gap: 6px; font-size: 13px; }
   #popover .actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  header > a.icon-btn { white-space: nowrap; flex: none; }
+  .ocr { flex: none; display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+  .ocr-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); cursor: help; }
+  .ocr-tag.off { background: var(--line); color: var(--ink-2); }
+  /* 本机识别的透明文字层：按识别出的行框摆放，pdf.js 原有的选区样式照常生效 */
+  .textLayer .mo-ocr { position: absolute; color: transparent; white-space: pre; transform-origin: 0 0; line-height: 1; cursor: text; }
   .presence { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); white-space: nowrap; padding: 0 6px; }
   .dot-status { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .5; }
   .dot-status.on { background: var(--ok); opacity: 1; }
@@ -109,6 +115,7 @@
   <a class="icon-btn" href="/" title="返回书库">← 书库</a>
   <span class="title" id="title"></span>
   <span class="where" id="where"></span>
+  <span class="ocr" id="ocr" hidden></span>
   <span class="grow"></span>
   <button class="icon-btn" id="zoomOut" title="缩小">A−</button>
   <button class="icon-btn" id="zoomFit" title="适应宽度 / 默认字号">⤢</button>

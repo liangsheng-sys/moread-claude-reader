@@ -3,7 +3,7 @@ import { findQuote, mergeRects, fillColor, lineColor } from './anchor.js'
 
 const wave = color => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><path d='M0 3 Q2 0 4 3 T8 3' fill='none' stroke='${color}' stroke-width='1.4'/></svg>`)}") repeat-x left bottom`
 
-export async function createPdfViewer({ stage, url, initial, onRelocate, onSelect, onAnnotationClick, getAnnotations }) {
+export async function createPdfViewer({ stage, url, initial, onRelocate, onSelect, onAnnotationClick, getAnnotations, getOcrPage = () => null }) {
   const pdfjsLib = await import('/vendor/pdfjs/build/pdf.mjs')
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.mjs'
   globalThis.pdfjsLib = pdfjsLib
@@ -41,7 +41,32 @@ export async function createPdfViewer({ stage, url, initial, onRelocate, onSelec
   })
   const report = n => onRelocate({ section: n, fraction: total > 1 ? (n - 1) / (total - 1) : 1, label: `第 ${n} / ${total} 页` })
   eventBus.on('pagechanging', ({ pageNumber }) => report(pageNumber))
-  eventBus.on('textlayerrendered', ({ pageNumber }) => draw(pageNumber))
+  eventBus.on('textlayerrendered', ({ pageNumber }) => { addOcrLayer(pageNumber); draw(pageNumber) })
+
+  // ---- 扫描页：把本机识别出的文字按行框叠成透明文字，和真文字层一样能选中、划线 ----
+  function addOcrLayer(pageNumber) {
+    const lines = getOcrPage(pageNumber)
+    const textLayer = viewer.getPageView(pageNumber - 1)?.div?.querySelector('.textLayer')
+    if (!lines?.length || !textLayer) return
+    if ([...textLayer.querySelectorAll('span:not(.mo-ocr)')].some(s => s.textContent.trim())) return // 本来就有文字层
+    textLayer.querySelectorAll('.mo-ocr, .mo-ocr-br').forEach(el => el.remove())
+    const { width: W, height: H } = textLayer.getBoundingClientRect()
+    if (!W || !H) return
+    const spans = []
+    for (const { t, b: [x0, y0, x1, y1] } of lines) {
+      const span = document.createElement('span')
+      span.className = 'mo-ocr'
+      span.textContent = t
+      Object.assign(span.style, { left: `${x0 * 100}%`, top: `${y0 * 100}%`, fontSize: `${(y1 - y0) * H * 0.92}px` })
+      const br = document.createElement('br')
+      br.className = 'mo-ocr-br'
+      textLayer.append(span, br)
+      spans.push([span, (x1 - x0) * W])
+    }
+    // 先统一量宽度再缩放，避免逐个读写触发多次排版
+    const widths = spans.map(([span]) => span.getBoundingClientRect().width)
+    spans.forEach(([span, target], i) => { if (widths[i]) span.style.transform = `scaleX(${target / widths[i]})` })
+  }
 
   // ---- 划线 ----
   function draw(pageNumber) {
@@ -105,6 +130,9 @@ export async function createPdfViewer({ stage, url, initial, onRelocate, onSelec
   return {
     goTo: section => { viewer.currentPageNumber = section },
     refreshAnnotations: redrawAll,
+    refreshOcr: () => {
+      for (let i = 1; i <= total; i++) if (viewer.getPageView(i - 1)?.div?.querySelector('.textLayer')) { addOcrLayer(i); draw(i) }
+    },
     zoom: delta => {
       if (delta === 0) viewer.currentScaleValue = 'page-width'
       else viewer.currentScale = Math.max(0.3, Math.min(5, viewer.currentScale * (delta > 0 ? 1.1 : 1 / 1.1)))

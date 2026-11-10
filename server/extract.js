@@ -82,9 +82,14 @@ function joinPdfLines(items) {
     }
   }
   if (cur.text) lines.push(cur)
+  return joinLines(lines)
+}
+
+/** lines: [{ text, y（基线，向上为正）, h, x0, x1 }]，按阅读顺序排好。OCR 结果也走这里。 */
+export function joinLines(lines, margins = {}) {
   if (!lines.length) return ''
-  const right = Math.max(...lines.map(l => l.x1))
-  const left = Math.min(...lines.map(l => l.x0))
+  const right = margins.right ?? Math.max(...lines.map(l => l.x1))
+  const left = margins.left ?? Math.min(...lines.map(l => l.x0))
   let out = lines[0].text
   for (let i = 1; i < lines.length; i++) {
     const prev = lines[i - 1], line = lines[i]
@@ -235,7 +240,7 @@ export async function readEpubImage(filePath, innerPath) {
 const COMPAT = /[⺀-⿟豈-﫿０-９Ａ-Ｚａ-ｚ]/g
 export const normalizeChars = s => s.replace(COMPAT, c => c.normalize('NFKC'))
 
-function tidy(text) {
+export function tidy(text) {
   return normalizeChars(text ?? '')
     .replace(/\r/g, '')
     .replace(/[ \t ]+/g, ' ')

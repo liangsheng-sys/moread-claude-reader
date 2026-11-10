@@ -6,8 +6,11 @@ import { extractBook } from './extract.js'
 import { chunkSections, BookIndex } from './search.js'
 import { embeddingEnabled, embedPassages } from './embed.js'
 import { bookDir, events, getState, load } from './store.js'
+import { loadOcr, ocrPageText, ocrStatus, OCR_ENGINE } from './ocr.js'
 
 const EXTRACT_VERSION = 2
+// 有可检索的文字：本来就有文字层，或者已经本机识别过
+const hasText = meta => !meta.scanned || !!meta.ocr
 let libraryDir = ''
 const books = new Map()      // id -> { id, file, rel, size, mtime, meta, status }
 const loaded = new Map()     // id -> { sections, index }
@@ -39,7 +42,7 @@ export function scan(retryVectors = false) {
     const stat = fs.statSync(file)
     const prev = books.get(id)
     if (prev && prev.size === stat.size && prev.mtime === stat.mtimeMs) {
-      if (retryVectors && prev.meta && embeddingEnabled() && !prev.meta.status.vectors && !prev.meta.scanned) enqueue(id)
+      if (retryVectors && prev.meta && embeddingEnabled() && !prev.meta.status.vectors && hasText(prev.meta)) enqueue(id)
       continue
     }
     let meta = null
@@ -49,7 +52,7 @@ export function scan(retryVectors = false) {
     books.set(id, book)
     loaded.delete(id)
     if (!fresh) enqueue(id)
-    else if (embeddingEnabled() && !meta.status.vectors && !meta.scanned) enqueue(id)
+    else if (embeddingEnabled() && !meta.status.vectors && hasText(meta)) enqueue(id)
   }
   for (const id of books.keys()) if (!seen.has(id)) { books.delete(id); loaded.delete(id) }
   return listBooks()
@@ -72,6 +75,7 @@ export function summary(book) {
     sectionBase: m?.sectionBase ?? null,
     sectionUnit: m?.sectionUnit ?? '',
     scanned: m?.scanned ?? false,
+    ocr: m?.format === 'pdf' && m?.scanned ? { engine: m.ocr?.engine ?? null, ...(ocrStatus(book.id) ?? { stage: 'none' }) } : null,
     status: book.status,
     progress: state.progress,
     furthest: state.furthest,
@@ -120,11 +124,15 @@ async function processBook(book) {
     setStatus(book, { stage: 'extracting' })
     const t0 = Date.now()
     const data = await extractBook(book.file)
+    // 重新解析时把之前本机识别的文字并回去
+    const ocr = loadOcr(book.id)
+    if (ocr) mergeOcr(data.sections, ocr)
     const chunks = chunkSections(data.sections)
     fs.writeFileSync(path.join(dir, 'sections.json'), JSON.stringify(data.sections))
     fs.writeFileSync(path.join(dir, 'chunks.json'), JSON.stringify(chunks))
     fs.rmSync(path.join(dir, 'vectors.bin'), { force: true })
     const { sections, ...rest } = data
+    if (ocr) rest.ocr = ocrMeta(ocr)
     meta = { ...rest, version: EXTRACT_VERSION, size: book.size, mtime: book.mtime, chunkCount: chunks.length, status: { stage: 'ready', vectors: false } }
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta))
     book.meta = meta
@@ -132,7 +140,7 @@ async function processBook(book) {
     console.log(`[书库] 已解析《${meta.title}》${meta.sectionCount}${meta.sectionUnit}，${chunks.length} 块，${Date.now() - t0}ms`)
     setStatus(book, meta.status)
   }
-  if (embeddingEnabled() && !meta.status.vectors && !meta.scanned && meta.chunkCount > 0) {
+  if (embeddingEnabled() && !meta.status.vectors && hasText(meta) && meta.chunkCount > 0) {
     const chunks = JSON.parse(fs.readFileSync(path.join(dir, 'chunks.json'), 'utf8'))
     setStatus(book, { stage: 'embedding', done: 0, total: chunks.length, vectors: false })
     let last = 0
@@ -157,6 +165,35 @@ async function processBook(book) {
     console.log(`[书库] 向量索引完成《${meta.title}》`)
     setStatus(book, meta.status)
   }
+}
+
+function mergeOcr(sections, ocr) {
+  for (const s of sections) {
+    const lines = ocr.pages[s.index]
+    if (lines && (s.ocr || (s.text ?? '').trim().length < 20)) { s.text = ocrPageText(lines); s.ocr = true }
+  }
+}
+const ocrMeta = ocr => ({ engine: OCR_ENGINE, local: true, pages: Object.keys(ocr.pages).length, complete: !!ocr.complete, updatedAt: new Date().toISOString() })
+
+/** 把识别结果并入正文、重建词法索引；识别全部完成后再排队建向量（中途建了也会被下一批作废）。 */
+export function applyOcrText(id, ocr, { complete }) {
+  const book = books.get(id)
+  if (!book?.meta) return
+  const dir = bookDir(id)
+  const sections = JSON.parse(fs.readFileSync(path.join(dir, 'sections.json'), 'utf8'))
+  mergeOcr(sections, ocr)
+  const chunks = chunkSections(sections)
+  fs.writeFileSync(path.join(dir, 'sections.json'), JSON.stringify(sections))
+  fs.writeFileSync(path.join(dir, 'chunks.json'), JSON.stringify(chunks))
+  fs.rmSync(path.join(dir, 'vectors.bin'), { force: true })
+  const meta = book.meta
+  meta.ocr = ocrMeta(ocr)
+  meta.chunkCount = chunks.length
+  meta.status = { stage: 'ready', vectors: false }
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta))
+  loaded.delete(id)
+  setStatus(book, meta.status)
+  if (complete) enqueue(id)
 }
 
 /** 加载正文与检索索引（解析完成后才可用）。 */

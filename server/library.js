@@ -9,6 +9,35 @@ import { bookDir, events, getState, load } from './store.js'
 import { loadOcr, ocrPageText, ocrStatus, OCR_ENGINE } from './ocr.js'
 
 const EXTRACT_VERSION = 2
+// 书名 / 作者：PDF 自带的信息常常是制作软件的名字（超星的「ssreader」、Word 的文件名……），
+// 这种就改用文件名。z-library 式文件名「书名 (作者) (z-library.sk, …)」拆成书名和作者。
+const JUNK = /^(ssreader|pdg\S*|untitled|unknown|anonymous|admin(istrator)?|user|无标题|未命名|microsoft word\b.*|.*\.(docx?|pdf|indd|tiff?|jpe?g|txt)|[\d\s_-]+)$/i
+const junk = s => !s?.trim() || JUNK.test(s.trim())
+export function parseFileName(file) {
+  let name = path.basename(file, path.extname(file)).replace(/\s*\((z-library|z-lib|1lib)[^()]*\)\s*$/i, '').trim()
+  let author = ''
+  // 末尾的一对括号（可能嵌套）是作者
+  if (/[)）]$/.test(name)) {
+    let depth = 0
+    for (let i = name.length - 1; i >= 0; i--) {
+      const c = name[i]
+      if (c === ')' || c === '）') depth++
+      else if ((c === '(' || c === '（') && --depth === 0) {
+        if (i > 0) { author = name.slice(i + 1, -1).trim(); name = name.slice(0, i).trim() }
+        break
+      }
+    }
+  }
+  return { title: name.replace(/_/g, ' ').replace(/\s{2,}/g, ' '), author }
+}
+function fixTitle(meta, file) {
+  const fromFile = parseFileName(file)
+  const before = `${meta.title}|${meta.author}`
+  if (junk(meta.title) || /z-library|z-lib\.|1lib\./i.test(meta.title)) meta.title = fromFile.title
+  if (junk(meta.author)) meta.author = fromFile.author
+  return before !== `${meta.title}|${meta.author}`
+}
+
 // 有可检索的文字：本来就有文字层，或者已经本机识别过
 const hasText = meta => !meta.scanned || !!meta.ocr
 let libraryDir = ''
@@ -48,6 +77,7 @@ export function scan(retryVectors = false) {
     let meta = null
     try { meta = JSON.parse(fs.readFileSync(path.join(bookDir(id), 'meta.json'), 'utf8')) } catch {}
     const fresh = meta && meta.size === stat.size && meta.mtime === stat.mtimeMs && meta.version === EXTRACT_VERSION
+    if (fresh && fixTitle(meta, file)) fs.writeFileSync(path.join(bookDir(id), 'meta.json'), JSON.stringify(meta))
     const book = { id, file, rel, size: stat.size, mtime: stat.mtimeMs, meta: fresh ? meta : null, status: fresh ? meta.status : { stage: 'queued' } }
     books.set(id, book)
     loaded.delete(id)
@@ -133,6 +163,7 @@ async function processBook(book) {
     fs.rmSync(path.join(dir, 'vectors.bin'), { force: true })
     const { sections, ...rest } = data
     if (ocr) rest.ocr = ocrMeta(ocr)
+    fixTitle(rest, book.file)
     meta = { ...rest, version: EXTRACT_VERSION, size: book.size, mtime: book.mtime, chunkCount: chunks.length, status: { stage: 'ready', vectors: false } }
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta))
     book.meta = meta

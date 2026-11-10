@@ -39,6 +39,7 @@ const S = {
   messages: await api(`${base}/messages`),
   k: await api(`${base}/knowledge`),
   status: await api('/api/status'),
+  ocrLayer: book.ocr && book.ocr.stage !== 'none' ? await api(`${base}/ocr`) : {},
   pos: book.progress,
   furthest: book.furthest,
   tab: 'toc',
@@ -396,6 +397,10 @@ new EventSource('/api/events').onmessage = async ev => {
     return renderStatus()
   }
   if (e.bookId !== id) return
+  if (e.type === 'book') {
+    if (e.ocr !== undefined) onOcrStatus(e.ocr)
+    return
+  }
   if (e.type === 'annotation' || e.type === 'annotation-deleted') {
     S.annotations = await api(`${base}/annotations`)
     S.status = await api('/api/status')
@@ -421,6 +426,41 @@ new EventSource('/api/events').onmessage = async ev => {
   setTab(S.tab)
 }
 
+// ---------- 扫描版：本机文字识别 ----------
+
+const ocrHint = '文字由本机的 RapidOCR 从扫描页识别，不联网、不上传；可能有个别错字。'
+function renderOcr() {
+  const o = book.ocr
+  const el = $('#ocr')
+  el.hidden = !o
+  if (!o) return
+  const stage = o.stage
+  if (stage === 'done') el.innerHTML = `<span class="ocr-tag" title="${ocrHint}">本机识别文字</span>`
+  else if (stage === 'running' || stage === 'queued') el.innerHTML = `<span class="ocr-tag" title="${ocrHint}识别完的页已经可以选中、划线和查找。">${stage === 'queued' ? '排队识别' : `本机识别中 ${o.done}/${o.total}`}</span><button class="icon-btn" data-ocr="stop">暂停</button>`
+  else el.innerHTML = `${o.done ? `<span class="ocr-tag" title="${ocrHint}">已识别 ${o.done}/${book.sectionCount} 页</span>` : '<span class="ocr-tag off" title="扫描版：页面只是图片，不能选中文字或查找">扫描版</span>'}<button class="icon-btn" data-ocr="start" title="用本机的文字识别把扫描页转成文字（不联网、不上传）。之后能查找、划线，Claude 也能直接读文字。">${o.done ? '继续识别' : '识别文字（OCR）'}</button>`
+}
+$('#ocr').onclick = async e => {
+  const act = e.target.closest('[data-ocr]')?.dataset.ocr
+  if (!act) return
+  e.target.disabled = true
+  const res = await fetch(`${base}/ocr`, { method: act === 'start' ? 'POST' : 'DELETE' })
+  if (!res.ok) toast((await res.json().catch(() => ({}))).error ?? '操作失败')
+}
+let ocrFetched = 0
+async function onOcrStatus(o) {
+  book.ocr = o ? { ...book.ocr, ...o } : book.ocr
+  renderOcr()
+  // 每多识别 10 页（或识别结束）就把新的文字层拿过来，翻到的页立刻能选中文字
+  const done = o?.done ?? 0
+  if (done - ocrFetched >= 10 || (o?.stage !== 'running' && done !== ocrFetched)) {
+    ocrFetched = done
+    S.ocrLayer = await api(`${base}/ocr`)
+    viewer?.refreshOcr?.()
+    if (o?.stage === 'done') toast('文字识别完成：现在可以查找、划线，Claude 也能直接读这本书了')
+  }
+}
+ocrFetched = Object.keys(S.ocrLayer).length
+
 // 阅读器放在最后创建：初始化时就会触发 relocate / 选区回调，用到上面声明的所有状态
 // ---------- 阅读器 ----------
 
@@ -431,6 +471,7 @@ const common = {
   url: `${base}/file`,
   initial: book.progress,
   getAnnotations: () => S.annotations,
+  getOcrPage: n => S.ocrLayer[n],
   onRelocate: relocate,
   onSelect: showSelbar,
   onAnnotationClick: showPopover,
@@ -465,6 +506,7 @@ $('#zoomOut').onclick = () => viewer.zoom(-1)
 $('#zoomFit').onclick = () => viewer.zoom(0)
 
 renderStatus()
+renderOcr()
 renderTheme()
 renderBookmarkButton()
 setTab(S.tab)

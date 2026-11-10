@@ -17,6 +17,7 @@ import * as knowledge from './knowledge.js'
 import { grep } from './search.js'
 import { exportBookMarkdown } from './export.js'
 import { formatInboxItem } from './inbox.js'
+import { cancelOcr, initOcr, ocrLayer, startOcr } from './ocr.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const config = {
@@ -82,6 +83,21 @@ app.get('/api/books/:id', (req, res) => {
   const book = bookOr404(req, res)
   if (!book) return
   res.json({ ...summary(book), toc: book.meta?.toc ?? [], chapters: book.meta ? proactive.chaptersOf(book.meta) : [], state: store.getState(book.id) })
+})
+
+// 扫描版 PDF：本机文字识别（排队、暂停、取透明文字层）
+app.post('/api/books/:id/ocr', (req, res) => {
+  const book = bookOr404(req, res)
+  if (!book) return
+  try { res.json(startOcr(book.id)) } catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.delete('/api/books/:id/ocr', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json({ ok: cancelOcr(book.id) })
+})
+app.get('/api/books/:id/ocr', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json(ocrLayer(book.id))
 })
 
 app.get('/api/books/:id/file', (req, res) => {
@@ -352,6 +368,7 @@ app.use('/vendor/marked', express.static(path.join(root, 'node_modules/marked/li
 app.use(express.static(path.join(root, 'web')))
 
 scan()
+initOcr(config.ocr)
 setInterval(() => { try { scan() } catch (e) { console.error(e) } }, 30000)
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flushAll(); process.exit(0) })
 process.on('exit', flushAll)

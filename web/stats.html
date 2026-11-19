@@ -170,13 +170,13 @@ async function load() {
     <div class="panel"><h3>时间线</h3>${timeline(f.days, s.titles, s.today)}</div>
 
     <h2>阅读统计</h2>
-    <div class="sub">只计算窗口在前台、最近 3 分钟内有操作的时间。</div>
+    <div class="sub">只计算阅读器在前台、窗口有焦点、最近 3 分钟内有操作的时间。${r.idleSeconds >= 60 ? `另有 ${dur(r.idleSeconds)} 书开着但没在读（切到别处或长时间没操作），不计入。` : ''}</div>
     ${tiles([[rv, ru, `${pname}阅读`], [r.daysRead, '天', `${pname}读过书的日子`], [r.streak, '天', '当前连续'], [r.longestStreak, '天', '最长连续'], [r.totalDaysRead, '天', '累计读书日']])}
     <div class="panel"><h3>近半年每天读了多久</h3>${heatmap(r.heatmap)}</div>
     <div class="panel"><h3>一天中什么时候读书（阅读时长）</h3>${hourBars(r.hours, dur)}</div>
     <div class="panel books"><h3>每本书花的时间</h3>${r.perBook.length ? (() => {
       const max = r.perBook[0].seconds
-      return r.perBook.map(b => `<div class="row" data-id="${b.id}" data-tip="${esc(b.title)} · ${dur(b.seconds)} · 读到 ${b.percent}%"><span class="name">${esc(b.title)}</span><span class="track"><i style="width:${(b.seconds / max) * 100}%"></i></span><span class="num">${dur(b.seconds)} · ${b.percent}%</span></div>`).join('')
+      return r.perBook.map(b => `<div class="row" data-id="${b.id}" data-tip="${esc(b.title)} · ${dur(b.seconds)} · ${b.finished ? '已读完' : `读到 ${b.percent}%`}"><span class="name">${esc(b.title)}</span><span class="track"><i style="width:${(b.seconds / max) * 100}%"></i></span><span class="num">${dur(b.seconds)} · ${b.finished ? '读完' : `${b.percent}%`}</span></div>`).join('')
     })() : '<div class="empty">这段时间还没有读书记录。</div>'}</div>`
 }
 $('#root').addEventListener('click', e => {

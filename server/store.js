@@ -81,6 +81,14 @@ export function addReadingTime(id, seconds) {
   save(id, 'state', state)
 }
 
+export function addIdleTime(id, seconds) {
+  const state = getState(id)
+  const key = today()
+  state.idleLog ??= {}
+  state.idleLog[key] = (state.idleLog[key] ?? 0) + Math.max(0, Math.min(seconds, 120))
+  save(id, 'state', state)
+}
+
 // ---------- 陪伴足迹：交流流水 ----------
 // role: user | claude；source: reader | terminal；kind: chat（对话）| annotation | note | memory
 export const listExchanges = () => load(null, 'exchanges', [])

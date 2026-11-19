@@ -49,5 +49,10 @@ export const COLORS = {
   purple: ['--hl-purple', '--line-purple'],
 }
 export const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-export const fillColor = c => cssVar((COLORS[c] ?? COLORS.yellow)[0])
-export const lineColor = c => cssVar((COLORS[c] ?? COLORS.yellow)[1])
+// 自选颜色直接存成 #rrggbb：划线用它本身，荧光底色用半透明
+const hex = c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)
+const rgba = (c, a) => `rgba(${parseInt(c.slice(1, 3), 16)}, ${parseInt(c.slice(3, 5), 16)}, ${parseInt(c.slice(5, 7), 16)}, ${a})`
+export const fillColor = c => hex(c) ? rgba(c, .36) : cssVar((COLORS[c] ?? COLORS.yellow)[0])
+export const lineColor = c => hex(c) ? c : cssVar((COLORS[c] ?? COLORS.yellow)[1])
+/** 选区工具条上的颜色：四种自带的 + 设置里加的。 */
+export const swatches = custom => [...Object.keys(COLORS).slice(0, 4).map(c => ({ id: c, title: '划线' })), ...(custom ?? []).map(c => ({ id: c.hex, title: c.name || '划线' }))]

@@ -91,6 +91,10 @@
   .outline .quote { cursor: pointer; }
   .link-btn { border: 0; background: none; color: var(--accent); padding: 4px 0; font-size: 12px; }
   .link-btn:hover { text-decoration: underline; }
+  .toc-note { font-size: 12px; color: var(--ink-2); background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.6; }
+  .toc-note .link-btn { display: block; }
+  #finished { font-size: 12px; }
+  #finished.on { color: var(--ok); }
   .hit { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.6; }
   .hit:hover { background: var(--paper); }
   .hit .num { display: block; font-size: 11px; color: var(--ink-3); }
@@ -116,6 +120,7 @@
   <span class="title" id="title"></span>
   <span class="where" id="where"></span>
   <span class="ocr" id="ocr" hidden></span>
+  <button class="icon-btn" id="finished"></button>
   <span class="grow"></span>
   <button class="icon-btn" id="zoomOut" title="缩小">A−</button>
   <button class="icon-btn" id="zoomFit" title="适应宽度 / 默认字号">⤢</button>

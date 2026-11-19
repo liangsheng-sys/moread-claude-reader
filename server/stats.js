@@ -61,7 +61,7 @@ export function computeStats(periodDays) {
       if (inPeriod(day)) secs += s
     }
     for (const [day, hs] of Object.entries(st.readingHours ?? {})) if (inPeriod(day)) for (const [h, s] of Object.entries(hs)) hours[h] += s
-    if (secs > 0) perBook.push({ id: b.id, title: b.title, format: b.format, seconds: secs, percent: Math.round((b.progress?.fraction ?? 0) * 100) })
+    if (secs > 0) perBook.push({ id: b.id, title: b.title, format: b.format, seconds: secs, percent: Math.round((b.progress?.fraction ?? 0) * 100), finished: !!b.finished })
   }
   perBook.sort((a, b) => b.seconds - a.seconds)
   const readDays = Object.keys(readingByDay).filter(d => readingByDay[d] >= 60).sort()
@@ -76,6 +76,9 @@ export function computeStats(periodDays) {
   const heatmapStart = addDays(today, -7 * 26 + 1)
   const heatmap = []
   for (let d = heatmapStart; d <= today; d = addDays(d, 1)) heatmap.push([d, Math.round(readingByDay[d] ?? 0)])
+  // 书开着但没在读（0.5.0 起才有记录）
+  let idleSecs = 0
+  for (const b of books) for (const [d, v] of Object.entries(store.getState(b.id).idleLog ?? {})) if (inPeriod(d)) idleSecs += v
   const periodSecs = Object.entries(readingByDay).filter(([d]) => inPeriod(d)).reduce((n, [, s]) => n + s, 0)
   const periodDaysRead = Object.entries(readingByDay).filter(([d, s]) => inPeriod(d) && s >= 60).length
 
@@ -159,7 +162,7 @@ export function computeStats(periodDays) {
       days,
     },
     reading: {
-      seconds: periodSecs, daysRead: periodDaysRead, streak, longestStreak: longest,
+      seconds: periodSecs, idleSeconds: idleSecs, daysRead: periodDaysRead, streak, longestStreak: longest,
       totalDaysRead: readDays.length, heatmap, hours: hours.map(Math.round), perBook,
     },
   }

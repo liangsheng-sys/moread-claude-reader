@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { extractBook } from './extract.js'
 import { chunkSections, BookIndex } from './search.js'
 import { embeddingEnabled, embedPassages } from './embed.js'
-import { bookDir, events, getState, load } from './store.js'
+import { bookDir, events, getState, load, save } from './store.js'
 import { loadOcr, ocrPageText, ocrStatus, OCR_ENGINE } from './ocr.js'
 
 const EXTRACT_VERSION = 2
@@ -36,6 +36,29 @@ function fixTitle(meta, file) {
   if (junk(meta.title) || /z-library|z-lib\.|1lib\./i.test(meta.title)) meta.title = fromFile.title
   if (junk(meta.author)) meta.author = fromFile.author
   return before !== `${meta.title}|${meta.author}`
+}
+
+// 重建的目录（Claude 根据书里印的目录页生成，或以后用户手动改）存在 toc.json，原目录留在 meta.tocOriginal。
+// 只要 meta 被重新加载或重新解析，就再套一次，保证所有地方（阅读器、章节划分、Claude 的工具）用的是同一份目录。
+const tocPath = id => path.join(bookDir(id), 'toc.json')
+export const loadTocOverride = id => { try { return JSON.parse(fs.readFileSync(tocPath(id), 'utf8')) } catch { return null } }
+function applyToc(id, meta) {
+  if (!meta) return meta
+  if (!meta.tocOriginal) meta.tocOriginal = meta.toc
+  const o = loadTocOverride(id)
+  meta.toc = o?.entries?.length ? o.entries : meta.tocOriginal
+  meta.tocSource = o?.entries?.length ? o.source : 'book'
+  return meta
+}
+/** 保存重建的目录；entries 为空则恢复书自带的目录。 */
+export function setTocOverride(id, entries, source = 'claude') {
+  const book = books.get(id)
+  if (!book?.meta) return null
+  if (entries?.length) fs.writeFileSync(tocPath(id), JSON.stringify({ source, entries, createdAt: new Date().toISOString() }))
+  else fs.rmSync(tocPath(id), { force: true })
+  applyToc(id, book.meta)
+  events.emit('change', { type: 'toc', bookId: id })
+  return book.meta.toc
 }
 
 // 有可检索的文字：本来就有文字层，或者已经本机识别过
@@ -78,6 +101,7 @@ export function scan(retryVectors = false) {
     try { meta = JSON.parse(fs.readFileSync(path.join(bookDir(id), 'meta.json'), 'utf8')) } catch {}
     const fresh = meta && meta.size === stat.size && meta.mtime === stat.mtimeMs && meta.version === EXTRACT_VERSION
     if (fresh && fixTitle(meta, file)) fs.writeFileSync(path.join(bookDir(id), 'meta.json'), JSON.stringify(meta))
+    if (fresh) applyToc(id, meta)
     const book = { id, file, rel, size: stat.size, mtime: stat.mtimeMs, meta: fresh ? meta : null, status: fresh ? meta.status : { stage: 'queued' } }
     books.set(id, book)
     loaded.delete(id)
@@ -92,9 +116,43 @@ export function listBooks() {
   return [...books.values()].map(summary).sort((a, b) => (b.lastOpened ?? '').localeCompare(a.lastOpened ?? '') || a.title.localeCompare(b.title))
 }
 
+// ---------- 读完 ----------
+// 读到正文结尾就算读完：书末的参考文献、索引、致谢之类不要求翻完。重翻时进度照常记录，但「已读完」不会消失。
+const BACK_MATTER = /^\s*(参考文献|参考书目|索引|致谢|鸣谢|注释|译名对照|术语表|出版后记|版权|bibliography|references|index|acknowledg|notes|glossary|about the author|作者简介)/i
+export function endOfBody(meta) {
+  if (!meta) return null
+  const last = meta.sectionBase + meta.sectionCount - 1
+  const tail = meta.toc.filter(t => t.section != null && t.depth === 0 && t.section > meta.sectionBase + meta.sectionCount * 0.7)
+  const back = tail.find(t => BACK_MATTER.test(t.title))
+  return back ? Math.max(meta.sectionBase, back.section - 1) : last
+}
+/** 进度变化时检查：最远位置第一次越过正文结尾，就标记读完（之后手动取消也不会被自动改回来）。 */
+export function checkFinished(id, prevFurthest) {
+  const book = books.get(id)
+  const state = getState(id)
+  const end = endOfBody(book?.meta)
+  if (end == null || state.finished || state.furthest == null || state.furthest < end) return false
+  if (prevFurthest != null && prevFurthest >= end) return false
+  state.finished = { at: new Date().toISOString(), by: 'auto' }
+  save(id, 'state', state)
+  return true
+}
+export function setFinished(id, on) {
+  const state = getState(id)
+  state.finished = on ? { at: new Date().toISOString(), by: 'me' } : false
+  save(id, 'state', state)
+  events.emit('change', { type: 'book', bookId: id })
+  return state.finished
+}
+
 export function summary(book) {
   const state = getState(book.id)
   const m = book.meta
+  // 0.5.0 之前读完的书：补记一次（finished 为 false 表示用户手动取消过）
+  if (state.finished === undefined && m && state.furthest != null && state.furthest >= endOfBody(m)) {
+    state.finished = { at: state.lastActiveAt ?? state.lastOpened ?? new Date().toISOString(), by: 'auto' }
+    save(book.id, 'state', state)
+  }
   return {
     id: book.id,
     title: m?.title ?? path.basename(book.rel),
@@ -109,6 +167,7 @@ export function summary(book) {
     status: book.status,
     progress: state.progress,
     furthest: state.furthest,
+    finished: state.finished || null,
     lastOpened: state.lastOpened,
   }
 }
@@ -166,7 +225,7 @@ async function processBook(book) {
     fixTitle(rest, book.file)
     meta = { ...rest, version: EXTRACT_VERSION, size: book.size, mtime: book.mtime, chunkCount: chunks.length, status: { stage: 'ready', vectors: false } }
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta))
-    book.meta = meta
+    book.meta = applyToc(book.id, meta)
     loaded.delete(book.id)
     console.log(`[书库] 已解析《${meta.title}》${meta.sectionCount}${meta.sectionUnit}，${chunks.length} 块，${Date.now() - t0}ms`)
     setStatus(book, meta.status)

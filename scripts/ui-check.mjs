@@ -7,7 +7,7 @@ page.on('console', m => ['error', 'warning'].includes(m.type()) && console.log(`
 page.on('pageerror', e => console.log('[pageerror]', e.message))
 page.on('response', r => r.status() >= 400 && console.log('[http ' + r.status() + ']', r.url()))
 page.on('requestfailed', r => console.log('[requestfailed]', r.url(), r.failure()?.errorText))
-await page.goto('http://127.0.0.1:8848' + p, { waitUntil: 'networkidle2' })
+await page.goto(`http://127.0.0.1:${process.env.MOREAD_PORT || 8848}` + p, { waitUntil: 'networkidle2' })
 await new Promise(r => setTimeout(r, Number(wait)))
 await page.screenshot({ path: out })
 await browser.close()

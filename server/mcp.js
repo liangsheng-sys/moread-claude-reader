@@ -11,6 +11,8 @@ import { getBookSummary, MEMORY_KINDS, recallMemories, saveBookSummary, saveMemo
 import { listOutlines, listTerms, saveOutline, saveTerm } from './knowledge.js'
 import { renderPdfPage } from './render.js'
 import { formatInboxItem } from './inbox.js'
+import * as shelf from './shelf.js'
+import { READ_STATUS } from './library.js'
 
 const MAX_READ_CHARS = 8000
 
@@ -52,14 +54,87 @@ export function createMcpServer() {
   const unreadArg = { include_unread: z.boolean().optional().describe('是否包含用户还没读到的部分。仅在用户明确同意时才设为 true') }
 
   server.registerTool('list_books', {
-    description: '列出书库里的所有书及阅读进度。',
-    inputSchema: {},
-  }, async () => text(listBooks().map(b => ({
-    id: b.id, title: b.title, author: b.author, format: b.format, path: b.path,
-    pages: b.sectionCount, progress: b.progress ? `${b.progress.label ?? ''} (${Math.round((b.progress.fraction ?? 0) * 100)}%)` : '未开始',
-    finished: b.finished ? true : undefined,
-    status: b.status.stage, vectors: !!b.status.vectors, scanned: b.scanned,
-  }))))
+    description: '列出书库里的书：阅读进度、阅读状态（未读 / 在读 / 读完 / 搁置）、分类（所在文件夹）和标签。可按状态或标签筛选。',
+    inputSchema: {
+      status: z.enum(['unread', 'reading', 'finished', 'shelved']).optional().describe('只看某种阅读状态'),
+      tag: z.string().optional().describe('只看带这个标签或在这个分类（文件夹）里的书'),
+    },
+  }, async ({ status, tag }) => {
+    const books = listBooks().filter(b => (!status || b.readStatus === status) && (!tag || b.tags.includes(tag) || b.category === tag))
+    if (!books.length) return text('没有符合条件的书。')
+    return text(books.map(b => ({
+      id: b.id, title: b.title, author: b.author, format: b.format, path: b.path,
+      pages: b.sectionCount, progress: b.progress ? `${b.progress.label ?? ''} (${Math.round((b.progress.fraction ?? 0) * 100)}%)` : '未开始',
+      read_status: READ_STATUS[b.readStatus],
+      category: b.category || undefined, tags: b.tags.length ? b.tags : undefined,
+      status: b.status.stage, vectors: !!b.status.vectors, scanned: b.scanned,
+    })))
+  })
+
+  server.registerTool('set_book_tags', {
+    description: '给书加 / 去标签（一本书可以有多个标签；所在文件夹另算分类，不用打成标签）。只在用户要求整理书库、或请你给书分类时用。先 list_books 看现有标签，尽量沿用已有的叫法，别造近义的新标签。',
+    inputSchema: {
+      book_id: z.string(),
+      add: z.array(z.string()).optional().describe('要加的标签，简短，如「设计」「交互」「入门」'),
+      remove: z.array(z.string()).optional().describe('要去掉的标签'),
+    },
+  }, async ({ book_id, add = [], remove = [] }) => {
+    const book = getBook(book_id)
+    if (!book) return fail(`找不到书籍 ${book_id}`)
+    const tags = shelf.editBookTags(book_id, { add, remove })
+    return text(`《${summary(book).title}》现在的标签：${tags.join('、') || '（无）'}`)
+  })
+
+  const listLine = (it, n, nextId) => `${n + 1}. 《${it.title}》${it.author ? ` ${it.author}` : ''} · ${it.inLibrary ? `${READ_STATUS[it.status]}${it.status === 'reading' ? ` ${Math.round(it.fraction * 100)}%` : ''} · book_id=${it.bookId}` : '不在书库'}${it.id === nextId ? ' ← 下一本' : ''}${it.addedBy === 'claude' ? '（你推荐的）' : ''}  [item_id=${it.id}]${it.note ? `\n   ${it.note}` : ''}`
+
+  server.registerTool('list_reading_lists', {
+    description: '查看用户的书单（有顺序的读书计划，可以包含书库里还没有的书）：每本书的阅读状态、下一本该读哪本。用户问「接下来读什么」「我的书单」时先看这个。',
+    inputSchema: { list_id: z.string().optional().describe('书单 id 或名字；省略则列出全部书单') },
+  }, async ({ list_id }) => {
+    const lists = list_id ? [shelf.getList(shelf.findList(list_id)?.id)].filter(Boolean) : shelf.listLists()
+    if (!lists.length) return text(list_id ? `找不到书单 ${list_id}` : '还没有书单。可以用 save_reading_list 新建。')
+    return text(lists.map(l => [
+      `## ${l.name}（list_id=${l.id}，读完 ${l.done}/${l.items.length}）`,
+      l.description || null,
+      ...l.items.map((it, n) => listLine(it, n, l.nextItemId)),
+    ].filter(Boolean).join('\n')).join('\n\n'))
+  })
+
+  server.registerTool('save_reading_list', {
+    description: '新建书单，或往已有书单里加书、改名、改说明、调整顺序。用户请你推荐一个领域的入门书单、或说「把这本加进书单」时用；推荐的书直接加进去（不必在书库里），用户可以自己删。'
+      + '书单是有顺序的学习路径：按「先读什么、再读什么」排，note 写一句为什么读它、读到哪一步读它。书单里已经有的书会自动跳过。',
+    inputSchema: {
+      list_id: z.string().optional().describe('已有书单的 id 或名字；省略则新建（这时 name 必填）'),
+      name: z.string().optional().describe('书单名，如「UI/UX 入门」'),
+      description: z.string().optional().describe('书单说明：这条路径为什么这么排、适合谁'),
+      items: z.array(z.object({
+        title: z.string().describe('书名（不带书名号）'),
+        author: z.string().optional(),
+        note: z.string().optional().describe('为什么读、读到哪一步读它，一两句'),
+        book_id: z.string().optional().describe('书库里已有的书传它的 id'),
+      })).optional(),
+      position: z.number().int().min(1).optional().describe('items 插到第几位（从 1 开始），省略则加在末尾'),
+      move: z.array(z.object({ item_id: z.string(), position: z.number().int().min(1) })).optional().describe('调整条目的位置（在删除、加书之后执行，position 按那时的顺序算）'),
+      remove_item_ids: z.array(z.string()).optional().describe('从书单里删掉的条目（item_id 见 list_reading_lists）'),
+      message: z.string().optional().describe('给用户的一段话，显示在书单顶部（用户在书单页请你推荐时用它回答，不要用 say）'),
+    },
+  }, async ({ list_id, name, description, items = [], position, move = [], remove_item_ids = [], message }) => {
+    let l = list_id ? shelf.findList(list_id) : null
+    if (list_id && !l) return fail(`找不到书单 ${list_id}。用 list_reading_lists 看看有哪些，或省略 list_id 新建。`)
+    if (!l) {
+      if (!name) return fail('新建书单需要 name。')
+      l = shelf.createList({ name, description, by: 'claude' })
+    } else if (name != null || description != null) shelf.updateList(l.id, { name, description })
+    if (remove_item_ids.length) shelf.removeItems(l.id, remove_item_ids)
+    const r = items.length ? shelf.addItems(l.id, items.map(i => ({ ...i, bookId: i.book_id })), { position: position != null ? position - 1 : undefined, by: 'claude' }) : { added: [], skipped: [] }
+    for (const m of move) shelf.updateItem(l.id, m.item_id, { position: m.position - 1 })
+    if (message != null) shelf.updateList(l.id, { reply: message })
+    const v = shelf.getList(l.id)
+    return text([
+      `书单「${v.name}」（list_id=${v.id}）已保存${r.added.length ? `，新加 ${r.added.length} 本` : ''}${r.skipped.length ? `，${r.skipped.map(t => `《${t}》`).join('')}已经在书单里，跳过` : ''}。现在的顺序：`,
+      ...v.items.map((it, n) => listLine(it, n, v.nextItemId)),
+    ].join('\n'))
+  })
 
   server.registerTool('get_reading_progress', {
     description: '查看用户当前读到哪里：书名、位置、所在章节、读过的最远位置、当前选中的文字、今日阅读时长、未处理的提问数。陪读时应先调用它。',
@@ -80,6 +155,7 @@ export function createMcpServer() {
       current: p ? { section: p.section, where: sectionName(meta, p.section), label: p.label, chapter: p.tocLabel ?? tocItemFor(meta, p.section), percent: Math.round((p.fraction ?? 0) * 100), updated_at: p.updatedAt } : null,
       chapter_range: p && chapterAt(meta, p.section) ? (({ title, start, end }) => ({ title, start, end }))(chapterAt(meta, p.section)) : undefined,
       learning_summary: getBookSummary(id) ?? undefined,
+      reading_lists: (l => l.length ? l.map(x => `「${x.name}」第 ${x.position}/${x.total} 本${x.next ? `，下一本《${x.next.title}》` : ''}`) : undefined)(shelf.listsWithBook(id)),
       furthest_read: state.furthest != null ? sectionName(meta, state.furthest) : null,
       finished: state.finished ? `已读完（${state.finished.at.slice(0, 10)}），现在的进度是重读` : undefined,
       selection: selection ? { section: selection.section, text: selection.text, at: selection.at } : null,
@@ -358,7 +434,7 @@ export function createMcpServer() {
     const items = store.takeInbox()
     if (!items.length) return text('没有新的提问。')
     return text(items.map(i => [
-      `[${{ ask: '选段提问', message: '面板留言', reply: '回复批注' }[i.kind] ?? i.kind} book_id=${i.bookId}${i.annotationId ? ` annotation_id=${i.annotationId}` : ''}]`,
+      `[${{ ask: '选段提问', message: '面板留言', reply: '回复批注', list: '书单留言' }[i.kind] ?? i.kind} ${i.listId ? `list_id=${i.listId}` : `book_id=${i.bookId}`}${i.annotationId ? ` annotation_id=${i.annotationId}` : ''}]`,
       formatInboxItem(i),
     ].join('\n')).join('\n\n'))
   })

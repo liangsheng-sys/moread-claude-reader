@@ -39,6 +39,13 @@
 - 书自带的目录坏了（`list_chapters` 会提示，比如 PDF 每页一个页码书签），或用户请你重建目录时：读书前面印的目录页，算出印刷页码和 PDF 页码的偏移，用 `save_toc` 重建。章节划分、随读段评、「读完」判断都依赖目录。
 - 术语表、大纲先 `list_terms` / `list_outlines` 再写，避免重复；大纲每个要点尽量附一句逐字原文作为依据。
 
+## 书库整理：标签、书单
+
+- 书有阅读状态（未读 / 在读 / 读完 / 搁置），书库里的文件夹就是分类，另外可以有多个标签。`list_books` 能按状态、标签筛选。
+- 用户请你给书分类时用 `set_book_tags`，沿用已有标签，别造近义词。没被要求时不要主动打标签。
+- **书单**是有顺序的学习路径，可以列书库里还没有的书。用户问「接下来读什么」、想系统地学一个领域、或让你推荐书时，先 `list_reading_lists`；推荐的书直接用 `save_reading_list` 加进书单（新领域就新建一个），按先后排好，每本的 note 写清为什么读、读到哪一步读它。推荐要真实存在的书，书名作者写准确。
+- `get_reading_progress` 会告诉你这本书在哪个书单里、下一本是什么；读完一本时任务正文也会提到，顺势把两本书联系起来说一句。
+
 ## 开发原则：不重复造轮子
 
 - 做新功能前，先看优秀的开源项目怎么做（阅读器如 KOReader、Calibre、Readest、foliate；本项目的前身 MoRead 在 `E:\cc伴读\MoRead`），能直接用的库就用，能借鉴的设计就借鉴。
@@ -49,6 +56,6 @@
 
 - 服务入口 `server/index.js`（阅读器 API + `/mcp`），工具在 `server/mcp.js`，解析在 `server/extract.js`，检索在 `server/search.js`。
 - 前端 `web/`：`reader.js` 通用逻辑，`pdf-view.js`（pdf.js）/ `epub-view.js`（foliate-js）各自适配。
-- 主动陪读在 `server/proactive.js`，设置 `server/settings.js`，足迹统计 `server/stats.js`，记忆 `server/memory.js`，大纲 / 术语 / 书签 `server/knowledge.js`。
+- 主动陪读在 `server/proactive.js`，设置 `server/settings.js`，足迹统计 `server/stats.js`，记忆 `server/memory.js`，标签 / 书单 `server/shelf.js`，大纲 / 术语 / 书签 `server/knowledge.js`。
 - 调试时用 `MOREAD_DATA_DIR=<数据副本目录> MOREAD_PORT=18848 node server/index.js` 启动，别动用户真实的 `data/`。**一定要换端口**：伴读监听会在 8848 上的服务停掉后立刻用真实数据重新拉起，测试请求会打进真实记录。
 - 调试：`node scripts/mcp-call.mjs <tool> '<json>'` 直接调工具；`node scripts/ui-check.mjs` / `ui-flow*.mjs` 用本机 Chrome 截图检查界面。

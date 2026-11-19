@@ -6,6 +6,7 @@ import { extractBook } from './extract.js'
 import { chunkSections, BookIndex } from './search.js'
 import { embeddingEnabled, embedPassages } from './embed.js'
 import { bookDir, events, getState, load, save } from './store.js'
+import { bookTags } from './shelf.js'
 import { loadOcr, ocrPageText, ocrStatus, OCR_ENGINE } from './ocr.js'
 
 const EXTRACT_VERSION = 2
@@ -87,12 +88,19 @@ export function scan(retryVectors = false) {
   }
   walk(libraryDir)
   const seen = new Set()
+  const rels = new Set(found.map(f => relOf(f)))
+  const paths = load(null, 'paths', {})
+  let pathsChanged = false
   for (const file of found) {
-    const rel = path.relative(libraryDir, file).split(path.sep).join('/')
-    const id = createHash('sha1').update(rel).digest('hex').slice(0, 12)
-    seen.add(id)
+    const rel = relOf(file)
     const stat = fs.statSync(file)
+    const known = paths[rel]
+    const id = known?.id ?? movedFrom(paths, rels, rel, stat.size) ?? createHash('sha1').update(rel).digest('hex').slice(0, 12)
+    if (!known || known.size !== stat.size) { paths[rel] = { id, size: stat.size, name: path.basename(rel) }; pathsChanged = true }
+    seen.add(id)
     const prev = books.get(id)
+    // 文件挪了位置（比如放进分类文件夹）：沿用原来的 id，阅读记录、批注都跟着走
+    if (prev && prev.rel !== rel) { prev.rel = rel; prev.file = file; events.emit('change', { type: 'book', bookId: id }) }
     if (prev && prev.size === stat.size && prev.mtime === stat.mtimeMs) {
       if (retryVectors && prev.meta && embeddingEnabled() && !prev.meta.status.vectors && hasText(prev.meta)) enqueue(id)
       continue
@@ -109,7 +117,39 @@ export function scan(retryVectors = false) {
     else if (embeddingEnabled() && !meta.status.vectors && hasText(meta)) enqueue(id)
   }
   for (const id of books.keys()) if (!seen.has(id)) { books.delete(id); loaded.delete(id) }
+  if (pathsChanged) save(null, 'paths', paths)
   return listBooks()
+}
+
+const relOf = file => path.relative(libraryDir, file).split(path.sep).join('/')
+// 书的 id 原本由相对路径算出，挪进文件夹就会变成「另一本书」，阅读记录全丢。
+// 现在记下每个路径对应的 id（data/paths.json）；新出现的路径如果和一个已经不在的旧路径同名同大小，就认作同一本书。
+function movedFrom(paths, rels, rel, size) {
+  const name = path.basename(rel)
+  const gone = Object.entries(paths).filter(([r, v]) => !rels.has(r) && v.name === name && v.size === size)
+  if (gone.length !== 1) return null
+  const [oldRel, v] = gone[0]
+  delete paths[oldRel]
+  console.log(`[书库] ${oldRel} → ${rel}，沿用原来的阅读记录`)
+  return v.id
+}
+/** 所在文件夹就是默认分类（书库根目录下的书没有分类）。 */
+export const categoryOf = rel => rel.includes('/') ? rel.split('/').slice(0, -1).join(' / ') : ''
+
+// ---------- 阅读状态：未读 / 在读 / 读完 / 搁置 ----------
+// 参考 MoRead 的 BookReadState：手动标记的「搁置」优先，其余按进度推出。搁置后再翻页就自动回到「在读」。
+export const READ_STATUS = { unread: '未读', reading: '在读', finished: '读完', shelved: '搁置' }
+export function readStatus(state) {
+  if (state.shelved) return 'shelved'
+  if (state.finished) return 'finished'
+  return state.progress ? 'reading' : 'unread'
+}
+export function setShelved(id, on) {
+  const state = getState(id)
+  state.shelved = on ? { at: new Date().toISOString() } : null
+  save(id, 'state', state)
+  events.emit('change', { type: 'book', bookId: id })
+  return state.shelved
 }
 
 export function listBooks() {
@@ -168,6 +208,10 @@ export function summary(book) {
     progress: state.progress,
     furthest: state.furthest,
     finished: state.finished || null,
+    shelved: state.shelved || null,
+    readStatus: readStatus(state),
+    category: categoryOf(book.rel),
+    tags: bookTags(book.id),
     lastOpened: state.lastOpened,
   }
 }

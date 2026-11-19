@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨知 · 书单</title>
+<link rel="icon" href="/favicon.svg">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/nav.js"></script>
+<style>
+  .layout { display: grid; grid-template-columns: 220px 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+  .side { display: flex; flex-direction: column; gap: 4px; }
+  .side .l { text-align: left; border: 0; background: none; border-radius: 8px; padding: 8px 10px; }
+  .side .l:hover { background: var(--line); }
+  .side .l.on { background: var(--accent-soft); font-weight: 600; }
+  .side .l small { display: block; font-weight: normal; color: var(--ink-3); font-size: 12px; }
+  .side .new { margin-top: 8px; }
+  .head h2 { font: 600 22px var(--serif); margin: 0; display: inline; }
+  .head .tools { float: right; display: flex; gap: 6px; }
+  .desc { color: var(--ink-2); margin: 8px 0 0; white-space: pre-wrap; }
+  .progress { margin: 10px 0 0; font-size: 13px; color: var(--ink-3); }
+  .progress .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; max-width: 320px; margin-top: 4px; }
+  .progress .bar i { display: block; height: 100%; background: var(--ok); }
+  .reply { margin: 16px 0 0; background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; }
+  .reply .who { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .ask { display: flex; gap: 8px; margin: 14px 0 0; }
+  .ask input { flex: 1; }
+  .ask-hint { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  ol.items { list-style: none; padding: 0; margin: 22px 0 0; counter-reset: n; }
+  .item { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; padding: 12px 8px; border-top: 1px solid var(--line); align-items: start; }
+  .item:last-child { border-bottom: 1px solid var(--line); }
+  .item .no { font: 600 18px var(--serif); color: var(--ink-3); text-align: center; line-height: 1.4; }
+  .item.done .no { color: var(--ok); }
+  .item.next { background: var(--surface); border-radius: 8px; box-shadow: inset 3px 0 0 var(--accent); }
+  .item .t { font-weight: 600; }
+  .item .t a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+  .item .t a:hover { border-color: var(--accent); }
+  .item .sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .item .note { margin-top: 4px; color: var(--ink-2); white-space: pre-wrap; }
+  .badge { font-size: 11px; border-radius: 10px; padding: 0 7px; border: 1px solid var(--line); color: var(--ink-2); }
+  .badge.finished { border-color: var(--ok); color: var(--ok); }
+  .badge.reading { border-color: var(--accent); color: var(--accent); }
+  .badge.missing { border-style: dashed; }
+  .badge.next { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .item .ops { display: flex; gap: 2px; opacity: .35; }
+  .item:hover .ops, .item:focus-within .ops { opacity: 1; }
+  @media (hover: none) { .item .ops { opacity: 1; } }
+  .item .ops button { padding: 2px 6px; }
+  .add { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 18px; }
+  .add input[name=note] { grid-column: 1 / -1; }
+  .add .row { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+  .empty { text-align: center; padding: 60px 20px; color: var(--ink-2); }
+  .edit textarea { min-height: 70px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>书单</h1>
+    <span class="muted">有顺序的读书计划，书库里还没有的书也能列进来</span>
+    <span style="flex:1"></span>
+    <nav class="topnav" id="topnav"></nav>
+  </div>
+  <div class="layout">
+    <div class="side" id="side"></div>
+    <div id="main"></div>
+  </div>
+</div>
+<datalist id="libraryTitles"></datalist>
+<script type="module">
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const send = (url, body, method = 'POST') => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) }).then(r => r.json())
+const STATUS = { unread: '未读', reading: '在读', finished: '读完', shelved: '搁置', missing: '不在书库' }
+
+let lists = [], books = [], online = false
+let current = new URLSearchParams(location.search).get('id')
+let editing = null   // 'head' | item id
+
+async function load() {
+  ;[lists, { books }, { online }] = await Promise.all([
+    fetch('/api/lists').then(r => r.json()), fetch('/api/books').then(r => r.json()), fetch('/api/status').then(r => r.json()),
+  ])
+  if (!lists.some(l => l.id === current)) current = lists[0]?.id ?? null
+  render()
+}
+
+function render() {
+  $('#libraryTitles').innerHTML = books.map(b => `<option value="${esc(b.title)}">`).join('')
+  $('#side').innerHTML = lists.map(l => `<button class="l${l.id === current ? ' on' : ''}" data-pick="${l.id}">${esc(l.name)}<small>读完 ${l.done}/${l.items.length}${l.createdBy === 'claude' ? ' · Claude 建的' : ''}</small></button>`).join('')
+    + `<button class="btn new" id="newList">＋ 新建书单</button>`
+  const l = lists.find(x => x.id === current)
+  if (!l) {
+    $('#main').innerHTML = `<div class="empty">还没有书单。<br><br>可以自己建一个，也可以在伴读时对 Claude 说「给我排一个 UI/UX 入门书单」，它会直接建好放在这里。</div>`
+    return
+  }
+  const pct = l.items.length ? Math.round(l.done / l.items.length * 100) : 0
+  const head = editing === 'head'
+    ? `<div class="edit"><input type="text" id="eName" value="${esc(l.name)}" style="font-size:18px;font-weight:600"><textarea id="eDesc" placeholder="书单说明：为什么这么排、适合什么阶段" style="margin-top:8px">${esc(l.description)}</textarea>
+       <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary" id="saveHead">保存</button><button class="btn" data-cancel>取消</button><span style="flex:1"></span><button class="btn" id="delList" style="color:#b33">删除书单</button></div></div>`
+    : `<div class="head"><div class="tools"><button class="btn" id="editHead">编辑</button></div><h2>${esc(l.name)}</h2>${l.description ? `<p class="desc">${esc(l.description)}</p>` : ''}
+       <div class="progress">读完 ${l.done} / ${l.items.length} 本<div class="bar"><i style="width:${pct}%"></i></div></div></div>`
+  $('#main').innerHTML = head
+    + (l.reply ? `<div class="reply"><div class="who">Claude · ${new Date(l.reply.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div><div>${esc(l.reply.text)}</div></div>` : '')
+    + `<form class="ask" id="ask"><input type="text" name="text" placeholder="请 Claude 调整这个书单，例如：再推荐 3 本交互设计入门书，排在合适的位置"><button class="btn">发给 Claude</button></form>
+       <div class="ask-hint">${online ? 'Claude 在线，会直接改这个书单，回复显示在上面。' : 'Claude 现在不在线：用「和Claude一起读」启动伴读后，它会收到这条消息。'}</div>`
+    + (l.items.length ? `<ol class="items">${l.items.map((it, i) => item(l, it, i)).join('')}</ol>` : `<div class="empty" style="padding:30px">书单是空的，在下面加第一本。</div>`)
+    + `<form class="add" id="add"><input type="text" name="title" list="libraryTitles" placeholder="书名（书库里的书会自动对上）" required><input type="text" name="author" placeholder="作者（可不填）">
+       <input type="text" name="note" placeholder="为什么读它 / 读到哪一步读它（可不填）"><div class="row"><button class="btn primary">加到书单末尾</button></div></form>`
+}
+
+function item(l, it, i) {
+  const isNext = it.id === l.nextItemId
+  const status = it.status === 'reading' ? `在读 ${Math.round(it.fraction * 100)}%` : STATUS[it.status]
+  if (editing === it.id) return `<li class="item"><div class="no">${i + 1}</div><div class="edit" style="display:grid;gap:6px">
+    <input type="text" id="iTitle" value="${esc(it.title)}" list="libraryTitles"><input type="text" id="iAuthor" value="${esc(it.author)}" placeholder="作者">
+    <textarea id="iNote" placeholder="为什么读它">${esc(it.note)}</textarea>
+    <div style="display:flex;gap:8px"><button class="btn primary" data-saveitem="${it.id}">保存</button><button class="btn" data-cancel>取消</button></div></div><div></div></li>`
+  return `<li class="item${it.status === 'finished' ? ' done' : ''}${isNext ? ' next' : ''}">
+    <div class="no">${it.status === 'finished' ? '✓' : i + 1}</div>
+    <div><div class="t">${it.inLibrary ? `<a href="/reader.html?id=${it.bookId}" title="打开阅读">${esc(it.title)}</a>` : esc(it.title)}</div>
+      <div class="sub">${it.author ? `<span>${esc(it.author)}</span>` : ''}<span class="badge ${it.status}">${status}</span>${isNext ? '<span class="badge next">下一本</span>' : ''}${it.addedBy === 'claude' ? '<span>Claude 推荐</span>' : ''}</div>
+      ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}</div>
+    <div class="ops"><button class="icon-btn" data-move="${it.id}" data-to="${i - 1}" ${i === 0 ? 'disabled' : ''} title="上移">↑</button><button class="icon-btn" data-move="${it.id}" data-to="${i + 1}" ${i === l.items.length - 1 ? 'disabled' : ''} title="下移">↓</button><button class="icon-btn" data-edit="${it.id}" title="编辑">✎</button><button class="icon-btn" data-del="${it.id}" title="移出书单">×</button></div>
+  </li>`
+}
+
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button')
+  if (!t) return
+  const base = `/api/lists/${current}`
+  if (t.dataset.pick) { current = t.dataset.pick; editing = null; history.replaceState(null, '', `?id=${current}`); return render() }
+  if (t.id === 'newList') {
+    const l = await send('/api/lists', { name: '新书单' })
+    current = l.id; editing = 'head'; await load()
+    return $('#eName')?.select()
+  }
+  if (t.id === 'editHead') { editing = 'head'; return render() }
+  if (t.dataset.cancel != null) { editing = null; return render() }
+  if (t.id === 'saveHead') { await send(base, { name: $('#eName').value, description: $('#eDesc').value }, 'PATCH'); editing = null; return load() }
+  if (t.id === 'delList') {
+    if (t.dataset.sure) { await fetch(base, { method: 'DELETE' }); editing = null; return load() }
+    t.dataset.sure = 1; t.textContent = '再点一次确认删除'; return
+  }
+  if (t.dataset.move) { await send(`${base}/items/${t.dataset.move}`, { position: Number(t.dataset.to) }, 'PATCH'); return load() }
+  if (t.dataset.edit) { editing = t.dataset.edit; render(); return $('#iNote')?.focus() }
+  if (t.dataset.saveitem) { await send(`${base}/items/${t.dataset.saveitem}`, { title: $('#iTitle').value, author: $('#iAuthor').value, note: $('#iNote').value }, 'PATCH'); editing = null; return load() }
+  if (t.dataset.del) { await fetch(`${base}/items/${t.dataset.del}`, { method: 'DELETE' }); return load() }
+})
+document.addEventListener('submit', async e => {
+  e.preventDefault()
+  const f = new FormData(e.target)
+  if (e.target.id === 'add') {
+    const title = f.get('title').trim()
+    const b = books.find(x => x.title === title)
+    const r = await send(`/api/lists/${current}/items`, { bookId: b?.id, title, author: f.get('author'), note: f.get('note') })
+    if (r.skipped?.length) toast(`《${r.skipped[0]}》已经在书单里了`)
+    await load()
+    $('#add [name=title]')?.focus()
+  }
+  if (e.target.id === 'ask') {
+    const text = f.get('text').trim()
+    if (!text) return
+    await send(`/api/lists/${current}/ask`, { text })
+    toast(online ? '已发给 Claude' : '已留言，Claude 上线后会看到')
+    load()
+  }
+})
+function toast(msg) {
+  const el = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg })
+  document.body.append(el)
+  setTimeout(() => el.remove(), 2200)
+}
+let timer
+new EventSource('/api/events').onmessage = e => {
+  if (['shelf', 'book'].includes(JSON.parse(e.data).type) && !editing) { clearTimeout(timer); timer = setTimeout(load, 300) }
+}
+load()
+</script>
+</body>
+</html>

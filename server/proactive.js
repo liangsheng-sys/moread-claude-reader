@@ -1,6 +1,7 @@
 // 主动陪读：观察阅读行为，在合适的时机给 Claude 派任务（经 channel 推送）。
 // 对应 MoRead 的 ProactiveAnnotationService（随读段评）与陪伴提醒，但触发在本地判断，
 // Claude 只在真正需要它的时候被叫醒。所有触发都受设置开关、每日上限和「Claude 是否在线」约束。
+import { listsWithBook } from './shelf.js'
 import { getBook } from './library.js'
 import { getSettings } from './settings.js'
 import * as store from './store.js'
@@ -353,6 +354,13 @@ function endSession(bookId, r, { summarize = true } = {}) {
   if (summarize) maybeSummarize(bookId)
 }
 
+/** 读完时：这本书在哪些书单里、下一本是什么 */
+function nextInLists(bookId) {
+  const lists = listsWithBook(bookId)
+  if (!lists.length) return ''
+  return `这本书在用户的书单里：${lists.map(l => `「${l.name}」第 ${l.position}/${l.total} 本，${l.next ? `下一本是《${l.next.title}》${l.next.inLibrary ? '' : '（还不在书库里）'}` : '书单已经读完了'}`).join('；')}。祝贺时顺带提一句接下来读什么，并把这本书和下一本联系起来说一句。`
+}
+
 /** 攒够时长（或攒了两天以上、至少 5 分钟）且 Claude 在线时，派一次「整理学习摘要」。 */
 function maybeSummarize(bookId, { force = false, justFinished = false } = {}) {
   const p = ledger()
@@ -374,7 +382,7 @@ function maybeSummarize(bookId, { force = false, justFinished = false } = {}) {
       summary ? `上一版学习摘要（读到第 ${summary.upto ?? '?'} ${unit}时写的）：\n${summary.content}` : '这本书还没有学习摘要。',
       '请静默整理：用 save_book_summary 在上一版的基础上更新，不要只写这一段：保留仍然成立的旧内容（尤其是用户的兴趣、困惑和还没聊完的话头），把这段读到的、聊到的并进去，已经解决的疑问挪到「已掌握」。可以先 list_annotations（author: me）和伴读对话看看这段用户写了什么、问了什么。',
       '如果这段时间里有值得长期记住的事（用户的困惑、兴趣、学习习惯、对某个概念的理解程度），用 save_memory 记一条。',
-      justFinished ? '这一版写成「读完时」的样子：全书学到了什么、还留着哪些疑问、接下来可以读什么。然后可以用 say 简短地祝贺一句，提一个回味全书的问题。终端里只回一句话。'
+      justFinished ? `这一版写成「读完时」的样子：全书学到了什么、还留着哪些疑问、接下来可以读什么。然后可以用 say 简短地祝贺一句，提一个回味全书的问题。${nextInLists(bookId)}终端里只回一句话。`
         : '不要用 say（用户已经离开），终端里也只回一句话。'].join('\n'),
   })
   if (ok) {

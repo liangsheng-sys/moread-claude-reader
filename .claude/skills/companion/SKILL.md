@@ -13,6 +13,7 @@ description: 开始伴读模式：监听墨知阅读器，实时接收用户在�
 3. 之后每条通知是一段 `[墨知 kind=... book_id=... section=...]` 加正文：
    - `kind=ask`（选中原文后提问）/ `kind=message`（伴读面板留言）：用户在看书、不在看终端。先 `read_book_section` 看原文，再用 `say` 把回答发到阅读器侧栏。
    - `kind=reply`（回复某条批注，带 `annotation_id`）：用 `reply_annotation` 回在那条批注下。
+   - `kind=list`（书单页留言，带 `list_id`）：用户在书单页请你推荐 / 调整书单。正文附了书单现状，直接用 `save_reading_list` 改书单，用它的 `message` 参数回话（显示在书单顶部），不要用 `say`。
    - `kind=event`（主动陪读任务，带 `event`、`task_id`）：按正文要求做，`add_annotation` 时传上 `task_id`；按 CLAUDE.md「主动陪读任务」一节的约定。
    - 这些消息已经标记为已读，不用再调用 `get_questions`。
    - 处理完在终端只回一句话说明做了什么。

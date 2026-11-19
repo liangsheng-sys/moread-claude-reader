@@ -37,6 +37,12 @@
 - 一段阅读结束（`session_end`）或用户要求时，用 `save_book_summary` 覆盖更新这本书的学习进度摘要：读到哪、掌握了什么、还没搞懂什么、下次可以从哪接着聊。
 - 术语表、大纲先 `list_terms` / `list_outlines` 再写，避免重复；大纲每个要点尽量附一句逐字原文作为依据。
 
+## 开发原则：不重复造轮子
+
+- 做新功能前，先看优秀的开源项目怎么做（阅读器如 KOReader、Calibre、Readest、foliate；本项目的前身 MoRead 在 `E:\cc伴读\MoRead`），能直接用的库就用，能借鉴的设计就借鉴。
+- 参考来的想法如果写法不够好，可以改进，不必照搬；在 CHANGELOG 里简单注明参考了谁、改了什么。
+- 需要反复参考的项目，下载到 `E:\cc伴读\参考\<项目名>`（和 MoRead 并列），不要放在临时目录。只读参考，不在里面改代码；引入代码时遵守对方许可证，并记进 `THIRD_PARTY_NOTICES` 一类的说明。
+
 ## 开发相关
 
 - 服务入口 `server/index.js`（阅读器 API + `/mcp`），工具在 `server/mcp.js`，解析在 `server/extract.js`，检索在 `server/search.js`。

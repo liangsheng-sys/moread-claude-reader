@@ -18,6 +18,7 @@ import * as knowledge from './knowledge.js'
 import { grep } from './search.js'
 import { exportBookMarkdown } from './export.js'
 import { formatInboxItem } from './inbox.js'
+import { buildId } from './build.js'
 import { cancelOcr, initOcr, ocrLayer, startOcr } from './ocr.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -38,6 +39,7 @@ initSettings({ spoilerGuard: config.spoilerGuard })
 initEmbedding(config.embedding)
 initLibrary(path.resolve(root, config.libraryDir))
 
+const BUILD = buildId(root)
 const app = express()
 const allowedHosts = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`])
 
@@ -360,7 +362,12 @@ app.delete('/api/memories/:id', (req, res) => res.json({ ok: deleteMemory(req.pa
 
 app.get('/api/settings', (req, res) => res.json({ settings: getSettings(), quota: proactive.quotaStatus() }))
 app.post('/api/settings', (req, res) => res.json({ settings: updateSettings(req.body), quota: proactive.quotaStatus() }))
-app.get('/api/status', (req, res) => res.json(proactive.quotaStatus()))
+app.get('/api/status', (req, res) => res.json({ ...proactive.quotaStatus(), build: BUILD }))
+// 启动器发现代码更新过时请旧服务退出（先把没写盘的数据写完）
+app.post('/api/shutdown', (req, res) => {
+  res.json({ ok: true })
+  setTimeout(() => { flushAll(); process.exit(0) }, 100)
+})
 
 // ---------- 终端侧（hooks） ----------
 

@@ -7,7 +7,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpServer } from './mcp.js'
 import { initStore, flushAll, events } from './store.js'
 import * as store from './store.js'
-import { initLibrary, scan, listBooks, getBook, summary, currentBookId, getLibraryDir, loadBook, checkFinished, setFinished, setTocOverride } from './library.js'
+import { initLibrary, scan, listBooks, getBook, summary, currentBookId, getLibraryDir, loadBook, checkFinished, setFinished, setTocOverride, setShelved } from './library.js'
+import * as shelf from './shelf.js'
 import { initEmbedding } from './embed.js'
 import { getSettings, initSettings, updateSettings } from './settings.js'
 import * as proactive from './proactive.js'
@@ -116,6 +117,8 @@ app.post('/api/books/:id/progress', (req, res) => {
     const prev = before.progress?.section ?? null
     const prevFurthest = before.furthest
     store.updateProgress(book.id, { section, fraction, label, tocLabel, cfi })
+    // 搁置的书又翻页了，就回到「在读」
+    if (before.shelved && prev != null && section !== prev) setShelved(book.id, false)
     proactive.onProgress(book.id, prev, section)
     if (checkFinished(book.id, prevFurthest)) {
       finished = true
@@ -136,6 +139,17 @@ app.post('/api/books/:id/progress', (req, res) => {
 app.post('/api/books/:id/finished', (req, res) => {
   const book = bookOr404(req, res)
   if (book) res.json({ finished: setFinished(book.id, !!req.body.on) })
+})
+
+// 搁置 / 取消搁置
+app.post('/api/books/:id/shelved', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json({ shelved: setShelved(book.id, !!req.body.on) })
+})
+// 标签（整组替换）
+app.put('/api/books/:id/tags', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json({ tags: shelf.setBookTags(book.id, Array.isArray(req.body.tags) ? req.body.tags : []) })
 })
 
 // 恢复书自带的目录（丢掉重建的目录）
@@ -264,6 +278,53 @@ app.get('/api/books/:id/export.md', (req, res) => {
   res.type('text/markdown').send(exportBookMarkdown(book))
 })
 
+// ---------- 整理书库：标签 / 书单 ----------
+
+app.get('/api/tags', (req, res) => res.json(shelf.allTags()))
+app.post('/api/tags/rename', (req, res) => res.json({ books: shelf.renameTag(String(req.body.from ?? ''), req.body.to ?? '') }))
+
+const listOr404 = (req, res) => {
+  const l = shelf.findList(req.params.list)
+  if (!l) res.status(404).json({ error: '书单不存在' })
+  return l
+}
+app.get('/api/lists', (req, res) => res.json(shelf.listLists()))
+app.post('/api/lists', (req, res) => res.json(shelf.createList({ name: req.body.name, description: req.body.description })))
+app.patch('/api/lists/:list', (req, res) => {
+  const l = listOr404(req, res)
+  if (l) res.json(shelf.updateList(l.id, req.body))
+})
+app.delete('/api/lists/:list', (req, res) => {
+  const l = listOr404(req, res)
+  if (l) res.json({ ok: shelf.deleteList(l.id) })
+})
+app.post('/api/lists/:list/items', (req, res) => {
+  const l = listOr404(req, res)
+  if (!l) return
+  const items = Array.isArray(req.body.items) ? req.body.items : [req.body]
+  res.json(shelf.addItems(l.id, items, { position: req.body.position }))
+})
+app.patch('/api/lists/:list/items/:item', (req, res) => {
+  const l = listOr404(req, res)
+  if (!l) return
+  const it = shelf.updateItem(l.id, req.params.item, req.body)
+  it ? res.json(it) : res.status(404).end()
+})
+app.delete('/api/lists/:list/items/:item', (req, res) => {
+  const l = listOr404(req, res)
+  if (l) res.json({ removed: shelf.removeItems(l.id, [req.params.item]) })
+})
+// 书单页「请 Claude 推荐」：发给 Claude，Claude 直接把书加进书单
+app.post('/api/lists/:list/ask', (req, res) => {
+  const l = listOr404(req, res)
+  if (!l) return
+  const text = String(req.body.text ?? '').trim()
+  store.pushInbox({ bookId: null, kind: 'list', listId: l.id, text })
+  store.logExchange({ role: 'user', kind: 'chat', source: 'reader', bookId: null, chars: chars(text) })
+  shelf.updateList(l.id, { reply: null })
+  res.json({ ok: true })
+})
+
 // ---------- 跨书：回顾 / 统计 / 记忆 / 设置 ----------
 
 app.get('/api/review', (req, res) => {
@@ -356,6 +417,7 @@ app.get('/api/inbox/pending', (req, res) => {
       return { id: i.id, content: i.text, meta }
     }
     if (i.annotationId) meta.annotation_id = i.annotationId
+    if (i.listId) meta.list_id = i.listId
     return { id: i.id, content: formatInboxItem(i), meta }
   }))
 })

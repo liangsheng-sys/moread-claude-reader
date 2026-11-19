@@ -37,6 +37,8 @@
   .mem .c { flex: 1; }
   .mem small { color: var(--ink-3); display: block; font-size: 11px; }
   .saved { font-size: 12px; color: var(--ok); }
+  input[type=color] { width: 32px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+  input[type=text] { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 </style>
 </head>
 <body>
@@ -70,9 +72,14 @@ function render() {
     <h2>主动陪读</h2>
     <div class="desc">只在用「和Claude一起读.bat」启动时生效。Claude 的主动行为会占用你的 Claude 订阅用量，不额外花钱。</div>
     <div class="quota"><span><span class="status-dot${quota.online ? ' on' : ''}"></span>${quota.online ? 'Claude 在线（伴读模式已连接）' : 'Claude 不在线'}</span><span>今日主动批注 <b>${quota.annotations}</b> / ${quota.annotationMax}</span><span>今日主动事件 <b>${quota.events}</b> / ${quota.eventMax}</span></div>
-    ${row('随读段评', '读完一章后，Claude 读这一章并在书上留 1~2 条批注（MoRead 同名功能）', sw('proactive.chapterAnnotations', p.chapterAnnotations))}
+    ${row('随读段评', '读完一章后，Claude 读这一章并在书上留批注（MoRead 同名功能）', sw('proactive.chapterAnnotations', p.chapterAnnotations))}
     ${row('时机', '进入章节时：Claude 会提前读这一章，翻到时批注已经在了', `<select data-path="proactive.timing"><option value="after"${p.timing === 'after' ? ' selected' : ''}>读完一章后</option><option value="entry"${p.timing === 'entry' ? ' selected' : ''}>进入章节时</option></select>`, { sub: true, off: !p.chapterAnnotations })}
-    ${row('每章条数', '下限可以是 0：没什么值得说的就不留', `<span>${num('proactive.minPerChapter', p.minPerChapter, '~')}${num('proactive.maxPerChapter', p.maxPerChapter, '条')}</span>`, { sub: true, off: !p.chapterAnnotations })}
+    ${row('怎么分段', '按章节：一章一次，条数随这一章的篇幅变。按页数：长章每读若干页就来一次，每次条数固定，段评更密、更贴近刚读的内容', `<select data-path="proactive.annotationMode"><option value="chapter"${p.annotationMode === 'chapter' ? ' selected' : ''}>按章节</option><option value="pages"${p.annotationMode === 'pages' ? ' selected' : ''}>按页数分段</option></select>`, { sub: true, off: !p.chapterAnnotations })}
+    ${p.annotationMode === 'pages'
+      ? row('每段页数', 'EPUB 没有页，按节分段', num('proactive.segmentPages', p.segmentPages, '页'), { sub: true, off: !p.chapterAnnotations })
+        + row('每段条数', '下限可以是 0：没什么值得说的就不留', `<span>${num('proactive.minPerChapter', p.minPerChapter, '~')}${num('proactive.maxPerChapter', p.maxPerChapter, '条')}</span>`, { sub: true, off: !p.chapterAnnotations })
+      : row('密度', '每 10 页最多留几条（EPUB 按每 6000 字算 10 页）。40 页的一章、密度 4 → 最多 16 条', num('proactive.density', p.density, '条 / 10 页'), { sub: true, off: !p.chapterAnnotations })
+        + row('每章最多', '再长的章也不超过这个数', num('proactive.maxPerUnit', p.maxPerUnit, '条'), { sub: true, off: !p.chapterAnnotations })}
     ${row('每日上限', '', num('proactive.dailyMax', p.dailyMax, '条'), { sub: true, off: !p.chapterAnnotations })}
     ${row('至少读多久才算读完', '快速翻过的章节不触发', num('proactive.chapterMinMinutes', p.chapterMinMinutes, '分钟'), { sub: true })}
     ${row('读完一章时整理术语', '新概念写进术语表（目录 → 术语）', sw('proactive.termsOnChapter', p.termsOnChapter))}
@@ -90,6 +97,8 @@ function render() {
   <section>
     <h2>阅读</h2>
     ${row('防剧透', 'Claude 默认只能读你读过的最远位置', sw('spoilerGuard', settings.spoilerGuard))}
+    ${row('自选荧光笔颜色', '加在选区工具条四种颜色的后面，最多 8 个。改名字是为了自己记得这个颜色用来标什么', `<button class="btn" data-addcolor>＋ 添加</button>`)}
+    ${(settings.highlightColors ?? []).map((c, i) => row(`<span style="display:inline-flex;gap:8px;align-items:center"><input type="color" data-color="${i}" value="${c.hex}"><input type="text" data-colorname="${i}" value="${esc(c.name)}" placeholder="用途（可选）" maxlength="12" style="width:140px"></span>`, '', `<button class="icon-btn" data-delcolor="${i}" title="删除">×</button>`, { sub: true })).join('')}
     ${row('主题', '', `<select id="theme"><option value="system"${theme === 'system' ? ' selected' : ''}>跟随系统</option><option value="light"${theme === 'light' ? ' selected' : ''}>浅色</option><option value="dark"${theme === 'dark' ? ' selected' : ''}>深色</option></select>`)}
   </section>
   <section>
@@ -101,9 +110,17 @@ function render() {
 
 let savedTimer
 const flash = () => { $('#saved').hidden = false; clearTimeout(savedTimer); savedTimer = setTimeout(() => { $('#saved').hidden = true }, 1500) }
+const saveColors = async list => { ({ settings, quota } = await post({ highlightColors: list })); render(); flash() }
 $('#root').addEventListener('change', async e => {
   const t = e.target
   if (t.id === 'theme') { moreadTheme.set(t.value); return flash() }
+  if (t.dataset.color != null || t.dataset.colorname != null) {
+    const list = structuredClone(settings.highlightColors ?? [])
+    const i = Number(t.dataset.color ?? t.dataset.colorname)
+    if (t.dataset.color != null) list[i].hex = t.value
+    else list[i].name = t.value.trim()
+    return saveColors(list)
+  }
   const path = t.dataset.path
   if (!path) return
   const value = t.type === 'checkbox' ? t.checked : t.type === 'number' ? Number(t.value) : t.value
@@ -115,6 +132,14 @@ $('#root').addEventListener('change', async e => {
   flash()
 })
 $('#root').addEventListener('click', async e => {
+  const list = settings.highlightColors ?? []
+  if (e.target.closest('[data-addcolor]')) {
+    if (list.length >= 8) return
+    const presets = ['#ff8a3d', '#22b8cf', '#a0522d', '#8bc34a', '#e64980', '#5c7cfa', '#868e96', '#fab005']
+    return saveColors([...list, { hex: presets.find(h => !list.some(c => c.hex === h)) ?? '#ff8a3d', name: '' }])
+  }
+  const del = e.target.closest('[data-delcolor]')?.dataset.delcolor
+  if (del != null) return saveColors(list.filter((_, i) => i !== Number(del)))
   const id = e.target.closest('[data-delmem]')?.dataset.delmem
   if (!id) return
   await fetch(`/api/memories/${id}`, { method: 'DELETE' })

@@ -1,5 +1,5 @@
 import { marked } from '/vendor/marked/marked.esm.js'
-import { COLORS, fillColor, lineColor } from './anchor.js'
+import { fillColor, lineColor, swatches } from './anchor.js'
 
 const $ = s => document.querySelector(s)
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
@@ -25,7 +25,7 @@ const toast = text => {
 const params = new URLSearchParams(location.search)
 const id = params.get('id')
 const base = `/api/books/${id}`
-const book = await api(base)
+let book = await api(base)
 document.title = `${book.title} · 墨知`
 $('#title').textContent = book.title
 const isPdf = book.format === 'pdf'
@@ -39,6 +39,7 @@ const S = {
   messages: await api(`${base}/messages`),
   k: await api(`${base}/knowledge`),
   status: await api('/api/status'),
+  colors: (await api('/api/settings')).settings.highlightColors ?? [],
   ocrLayer: book.ocr && book.ocr.stage !== 'none' ? await api(`${base}/ocr`) : {},
   pos: book.progress,
   furthest: book.furthest,
@@ -76,23 +77,44 @@ function relocate(p) {
   // 停留 1.5 秒才算「读到这里」，快速翻过的页不计入已读范围
   clearTimeout(progressTimer)
   progressTimer = setTimeout(() => {
-    api(`${base}/progress`, { method: 'POST', body: p }).catch(() => {})
+    api(`${base}/progress`, { method: 'POST', body: p }).then(r => {
+      if (r.finished) { book.finished = { at: new Date().toISOString(), by: 'auto' }; renderFinished(); toast('读完了这本书 🎉 以后重翻不会改掉「已读完」') }
+    }).catch(() => {})
     if (S.furthest == null || p.section > S.furthest) S.furthest = p.section
     if (S.tab === 'toc') renderPanel()
   }, 1500)
 }
 
+// 「在读」：页面在前台、窗口有焦点、3 分钟内有过操作。切到别的程序、别的标签页、最小化都立刻不算，
+// 只是鼠标从窗口上划过也不算（窗口没有焦点时的鼠标移动不记）。不算在读的时间另记为「开着没读」。
 let lastActive = Date.now()
-for (const ev of ['mousemove', 'keydown', 'wheel', 'pointerdown']) document.addEventListener(ev, () => { lastActive = Date.now() }, { passive: true })
-// EPUB 的内容在 iframe 里，事件不冒泡到外层
+const focused = () => document.visibilityState === 'visible' && document.hasFocus()
+for (const ev of ['mousemove', 'keydown', 'wheel', 'pointerdown']) document.addEventListener(ev, () => { if (focused()) lastActive = Date.now() }, { passive: true })
+let tick = Date.now()
 setInterval(() => {
-  if (!isPdf) for (const f of document.querySelector('foliate-view')?.renderer?.getContents?.() ?? []) if (f.doc?.hasFocus()) lastActive = Date.now()
-  if (document.visibilityState === 'visible' && Date.now() - lastActive < 3 * 60000) {
-    api(`${base}/progress`, { method: 'POST', body: { activeSeconds: 30 } }).catch(() => {})
-  }
+  // EPUB 的内容在 iframe 里，事件不冒泡到外层；iframe 有焦点时 document.hasFocus() 也为真
+  if (!isPdf && focused()) for (const f of document.querySelector('foliate-view')?.renderer?.getContents?.() ?? []) if (f.doc?.hasFocus()) lastActive = Date.now()
+  const secs = Math.min(120, Math.round((Date.now() - tick) / 1000))
+  tick = Date.now()
+  const active = focused() && Date.now() - lastActive < 3 * 60000
+  api(`${base}/progress`, { method: 'POST', body: active ? { activeSeconds: secs } : { idleSeconds: secs } }).catch(() => {})
 }, 30000)
 
-// ---------- 顶栏：书签 / 在线状态 / 主题 ----------
+// ---------- 顶栏：书签 / 在线状态 / 主题 / 读完 ----------
+
+function renderFinished() {
+  const el = $('#finished')
+  if (!el) return
+  const f = book.finished
+  el.textContent = f ? '✓ 已读完' : '标记读完'
+  el.classList.toggle('on', !!f)
+  el.title = f ? `${f.by === 'me' ? '你' : '读到正文结尾时自动'}标记于 ${new Date(f.at).toLocaleDateString('zh-CN')}；重翻不会改掉。点击取消` : '没翻到最后一页也可以手动标记读完'
+}
+$('#finished').onclick = async () => {
+  const r = await api(`${base}/finished`, { method: 'POST', body: { on: !book.finished } })
+  book.finished = r.finished || null
+  renderFinished()
+}
 
 const bookmarkHere = () => S.k.bookmarks.find(b => b.section === S.pos?.section)
 function renderBookmarkButton() {
@@ -170,10 +192,13 @@ function renderToc() {
   const cur = S.pos?.section
   let body = ''
   if (S.tocView === 'toc') {
-    if (!book.toc.length) body = '<div class="empty">这本书没有目录</div>'
+    const rebuild = '<button class="link-btn" data-request="toc">请 Claude 根据书里的目录页重建</button>'
+    if (book.tocSource === 'claude') body += `<div class="toc-note">这是 Claude 根据书里印的目录页重建的目录。<button class="link-btn" data-restoretoc>恢复书自带的目录</button></div>`
+    else if (!book.tocUsable) body += `<div class="toc-note">${book.toc.length ? '这本书自带的目录不能用来分章（比如每页一个书签），' : '这本书没有目录，'}Claude 现在只能按每 10 页一段陪读。${rebuild}</div>`
+    if (!book.toc.length) body += book.tocUsable ? '<div class="empty">这本书没有目录</div>' : ''
     else {
       const current = book.toc.filter(t => t.section != null && cur != null && t.section <= cur).pop()
-      body = book.toc.map(t => `<div class="toc-item${t === current ? ' current' : ''}${t.section != null && readTo(t.section) ? ' read' : ''}" data-section="${t.section ?? ''}" style="padding-left:${8 + t.depth * 14}px">${esc(t.title)}${isPdf && t.section ? `<span class="num">${t.section}</span>` : ''}</div>`).join('')
+      body += book.toc.map(t => `<div class="toc-item${t === current ? ' current' : ''}${t.section != null && readTo(t.section) ? ' read' : ''}" data-section="${t.section ?? ''}" style="padding-left:${8 + t.depth * 14}px">${esc(t.title)}${isPdf && t.section ? `<span class="num">${t.section}</span>` : ''}</div>`).join('')
     }
   } else if (S.tocView === 'outline') {
     const chapters = book.chapters.filter(c => readTo(c.start))
@@ -257,11 +282,14 @@ panel.addEventListener('click', async e => {
   const tv = t.closest('[data-tocview]')
   if (tv) { S.tocView = tv.dataset.tocview; try { localStorage.setItem('moread.tocView', S.tocView) } catch {} return renderPanel() }
   if (t.id === 'newNote') return noteForm()
+  if (t.closest('[data-restoretoc]')) return api(`${base}/toc`, { method: 'DELETE' })
   const req = t.closest('[data-request]')
   if (req) {
-    return request(req.dataset.request === 'outline'
-      ? `请为「${req.dataset.title}」这一章写大纲（save_chapter_outline）。`
-      : '请把我目前读过部分的重要术语整理进术语表（save_term）。')
+    return request({
+      outline: `请为「${req.dataset.title}」这一章写大纲（save_chapter_outline）。`,
+      terms: '请把我目前读过部分的重要术语整理进术语表（save_term）。',
+      toc: '这本书自带的目录不好用，请根据书里印的目录页重建目录（save_toc）。',
+    }[req.dataset.request])
   }
   const delterm = t.closest('[data-delterm]')
   if (delterm) { e.stopPropagation(); return api(`${base}/terms/${delterm.dataset.delterm}`, { method: 'DELETE' }) }
@@ -318,7 +346,7 @@ function showSelbar(sel) {
   selPost = setTimeout(() => api(`${base}/selection`, { method: 'POST', body: sel ? { section: sel.section, text: sel.text } : {} }).catch(() => {}), 400)
   if (!sel) return hideSelbar()
   hidePopover()
-  selbar.innerHTML = `<div class="row">${Object.keys(COLORS).slice(0, 4).map(c => `<button class="sw" data-color="${c}" title="划线" style="background:${fillColor(c).replace(/,\s*[\d.]+\)$/, ', .9)')}"></button>`).join('')}<span class="sep"></span><button class="icon-btn" data-act="wavy">波浪线</button><button class="icon-btn" data-act="ask">问 Claude</button><button class="icon-btn" data-act="copy">复制</button></div>`
+  selbar.innerHTML = `<div class="row">${swatches(S.colors).map(c => `<button class="sw" data-color="${c.id}" title="${esc(c.title)}" style="background:${fillColor(c.id).replace(/,\s*[\d.]+\)$/, ', .9)')}"></button>`).join('')}<span class="sep"></span><button class="icon-btn" data-act="wavy">波浪线</button><button class="icon-btn" data-act="ask">问 Claude</button><button class="icon-btn" data-act="copy">复制</button></div>`
   place(selbar, sel.rect)
 }
 function hideSelbar() { selbar.hidden = true }
@@ -363,7 +391,7 @@ function showPopover(annId, rect) {
     ${a.note ? `<div class="md">${md(a.note)}</div>` : ''}
     <div class="replies">${a.replies.map(r => `<div class="reply">${avatar(r.author)}<div class="md" style="flex:1">${md(r.text)}</div></div>`).join('')}</div>
     <textarea id="replyInput" rows="2" style="margin-top:10px" placeholder="${mine ? '写点想法，或问问 Claude…' : '回复 Claude…'}"></textarea>
-    <div class="actions">${mine ? `${Object.keys(COLORS).slice(0, 4).map(c => `<button class="sw" data-recolor="${c}" style="width:16px;height:16px;border-radius:50%;border:0;background:${fillColor(c).replace(/,\s*[\d.]+\)$/, ', .9)')}"></button>`).join('')}<button class="icon-btn" data-del>删除</button>` : ''}<span style="flex:1"></span>${mine ? '<button class="btn" data-savenote>存为想法</button>' : ''}<button class="btn primary" data-reply>${mine ? '问 Claude' : '回复'}</button></div>`
+    <div class="actions">${mine ? `${swatches(S.colors).map(c => `<button class="sw" data-recolor="${c.id}" title="${esc(c.title)}" style="width:16px;height:16px;border-radius:50%;border:0;background:${fillColor(c.id).replace(/,\s*[\d.]+\)$/, ', .9)')}"></button>`).join('')}<button class="icon-btn" data-del>删除</button>` : ''}<span style="flex:1"></span>${mine ? '<button class="btn" data-savenote>存为想法</button>' : ''}<button class="btn primary" data-reply>${mine ? '问 Claude' : '回复'}</button></div>`
   place(pop, rect, true)
 }
 function hidePopover() { pop.hidden = true; popId = null }
@@ -399,6 +427,12 @@ new EventSource('/api/events').onmessage = async ev => {
   if (e.bookId !== id) return
   if (e.type === 'book') {
     if (e.ocr !== undefined) onOcrStatus(e.ocr)
+    return
+  }
+  if (e.type === 'toc') {
+    book = { ...book, ...(await api(base)), finished: book.finished }
+    toast(book.tocSource === 'claude' ? 'Claude 重建了目录' : '已恢复书自带的目录')
+    if (S.tab === 'toc') renderPanel()
     return
   }
   if (e.type === 'annotation' || e.type === 'annotation-deleted') {
@@ -506,6 +540,7 @@ $('#zoomOut').onclick = () => viewer.zoom(-1)
 $('#zoomFit').onclick = () => viewer.zoom(0)
 
 renderStatus()
+renderFinished()
 renderOcr()
 renderTheme()
 renderBookmarkButton()

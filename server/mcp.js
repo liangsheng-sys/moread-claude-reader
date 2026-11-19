@@ -1,12 +1,12 @@
 // 给 Claude Code 的 MCP 工具。命名与 MoRead 的 ReaderToolset 对齐。
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { currentBookId, getBook, listBooks, loadBook, summary } from './library.js'
+import { currentBookId, getBook, listBooks, loadBook, setTocOverride, summary } from './library.js'
 import { grep } from './search.js'
 import { readEpubImage, normalizeChars } from './extract.js'
 import * as store from './store.js'
 import { getSettings } from './settings.js'
-import { chapterAt, quotaStatus, readPermit, useAnnotationQuota } from './proactive.js'
+import { chapterAt, chaptersOf, quotaStatus, readPermit, useAnnotationQuota } from './proactive.js'
 import { getBookSummary, MEMORY_KINDS, recallMemories, saveBookSummary, saveMemory } from './memory.js'
 import { listOutlines, listTerms, saveOutline, saveTerm } from './knowledge.js'
 import { renderPdfPage } from './render.js'
@@ -57,6 +57,7 @@ export function createMcpServer() {
   }, async () => text(listBooks().map(b => ({
     id: b.id, title: b.title, author: b.author, format: b.format, path: b.path,
     pages: b.sectionCount, progress: b.progress ? `${b.progress.label ?? ''} (${Math.round((b.progress.fraction ?? 0) * 100)}%)` : '未开始',
+    finished: b.finished ? true : undefined,
     status: b.status.stage, vectors: !!b.status.vectors, scanned: b.scanned,
   }))))
 
@@ -80,6 +81,7 @@ export function createMcpServer() {
       chapter_range: p && chapterAt(meta, p.section) ? (({ title, start, end }) => ({ title, start, end }))(chapterAt(meta, p.section)) : undefined,
       learning_summary: getBookSummary(id) ?? undefined,
       furthest_read: state.furthest != null ? sectionName(meta, state.furthest) : null,
+      finished: state.finished ? `已读完（${state.finished.at.slice(0, 10)}），现在的进度是重读` : undefined,
       selection: selection ? { section: selection.section, text: selection.text, at: selection.at } : null,
       reading_minutes_today: Math.round((state.readingLog[store.today()] ?? 0) / 60),
       reading_days: days.length,
@@ -97,9 +99,41 @@ export function createMcpServer() {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
     const furthest = store.getState(r.id).furthest ?? -1
-    if (!r.meta.toc.length) return text(`这本书没有目录。共 ${r.meta.sectionCount}${r.meta.sectionUnit}。`)
-    return text(r.meta.toc.map(t =>
-      `${'  '.repeat(t.depth)}${t.title}${t.section != null ? ` → ${sectionName(r.meta, t.section)}${t.section <= furthest ? ' ✓' : ''}` : ''}`).join('\n'))
+    const bad = chaptersOf(r.meta).fallback
+      ? `\n\n（这本书的目录不可用${r.meta.toc.length ? '（多半是每页一个书签）' : ''}，阅读器只能按每 10 页一段陪读。如果书里印着目录页，可以用 save_toc 重建。）` : ''
+    const note = r.meta.tocSource === 'claude' ? '（这是根据书中目录页重建的目录）\n' : ''
+    if (!r.meta.toc.length) return text(`这本书没有目录。共 ${r.meta.sectionCount}${r.meta.sectionUnit}。${bad}`)
+    return text(note + r.meta.toc.map(t =>
+      `${'  '.repeat(t.depth)}${t.title}${t.section != null ? ` → ${sectionName(r.meta, t.section)}${t.section <= furthest ? ' ✓' : ''}` : ''}`).join('\n') + bad)
+  })
+
+  server.registerTool('save_toc', {
+    description: '重建这本书的目录（替换书自带的坏目录，原目录会保留，用户可以在阅读器里恢复）。适用于 PDF 自带书签是每页一个页码、缺章节、或根本没有目录的情况。'
+      + '做法：先用 read_book_section 读书前面印着的「目录」页（扫描版看识别文字，读不通就 view_page 看图）；书上印的页码和 PDF 页码通常差一个固定偏移，'
+      + '找一个能确认的章首页（如第一章开头）算出偏移，再把所有条目换算成 PDF 页码 / EPUB 节号。条目按书中顺序给出；章用 depth 0，节用 depth 1。'
+      + '前言、致谢、参考文献、索引等也列上（depth 0），阅读器靠它们判断正文在哪结束。不需要为此读用户还没读到的正文。',
+    inputSchema: {
+      ...bookArg,
+      entries: z.array(z.object({
+        title: z.string().describe('标题，照书上印的写，如「第三章 头脑中的知识与外界知识」'),
+        section: z.number().int().describe('PDF 页码（从 1 开始，已换算偏移）/ EPUB 节号'),
+        depth: z.number().int().min(0).max(3).optional().describe('层级：0 章，1 节，默认 0'),
+      })).min(1),
+    },
+  }, async ({ book_id, entries }) => {
+    const r = resolve(book_id)
+    if (r.error) return fail(r.error)
+    const first = r.meta.sectionBase, last = r.meta.sectionBase + r.meta.sectionCount - 1
+    const out = entries.map(e => ({ title: e.title.trim(), section: e.section, depth: e.depth ?? 0 }))
+    const bad = out.filter(e => !e.title || e.section < first || e.section > last)
+    if (bad.length) return fail(`有 ${bad.length} 条页码超出范围（${first}–${last}）：${bad.slice(0, 3).map(e => `「${e.title}」${e.section}`).join('、')}`)
+    for (let i = 1; i < out.length; i++) {
+      if (out[i].section < out[i - 1].section) return fail(`页码不是递增的：「${out[i - 1].title}」${out[i - 1].section} 之后是「${out[i].title}」${out[i].section}。检查偏移是否算对。`)
+    }
+    setTocOverride(r.id, out, 'claude')
+    const chapters = chaptersOf(r.meta)
+    return text(`目录已重建，共 ${out.length} 条。阅读器据此划分出 ${chapters.fallback ? '0 章（仍然不可用，请检查章标题和层级）' : `${chapters.length} 章`}：\n`
+      + chapters.slice(0, 40).map(c => `${c.title}：${sectionName(r.meta, c.start)}–${c.end}`).join('\n'))
   })
 
   server.registerTool('read_book_section', {
@@ -332,12 +366,19 @@ export function createMcpServer() {
   // ---------- 记忆（对应 MoRead 的滚动剧情摘要 + 长期记忆） ----------
 
   server.registerTool('save_book_summary', {
-    description: '覆盖更新这本书的「学习进度摘要」：读到哪、掌握了哪些概念、还有什么疑问。只保留最新一份，下次陪读（或用户隔天回来）时会先看到它。200~500 字为宜。',
+    description: '更新这本书的「学习进度摘要」，下次陪读（或用户隔天回来）时会先看到它。新版会替换旧版，所以要在旧版（get_reading_progress 的 learning_summary）基础上增补，而不是只写最近一段：'
+      + '保留仍然成立的旧内容，尤其是用户的兴趣、困惑和没聊完的话头；新读到、新聊到的并进去；解决了的疑问挪到「已掌握」。'
+      + '建议分四块：【进度】【已掌握 / 讨论过】【疑问与兴趣】【下次可以接着聊】。300~900 字，越读越长是正常的。',
     inputSchema: { ...bookArg, content: z.string() },
   }, async ({ book_id, content }) => {
     const r = resolve(book_id)
     if (r.error) return fail(r.error)
-    saveBookSummary(r.id, content, store.getState(r.id).furthest)
+    const prev = getBookSummary(r.id)
+    saveBookSummary(r.id, content, store.getState(r.id).progress?.section ?? store.getState(r.id).furthest)
+    // 防止「覆盖更新」把早先的内容丢掉：比上一版短很多时提醒核对（旧版在 summary-history 里还留着）
+    if (prev && content.length < prev.content.length * 0.6) {
+      return text(`学习摘要已更新。不过新版（${content.length} 字）比上一版（${prev.content.length} 字）短了不少。上一版是：\n\n${prev.content}\n\n如果有仍然成立、却没写进新版的内容（兴趣、困惑、没聊完的话头），请合并后再调用一次 save_book_summary。`)
+    }
     return text('学习进度摘要已更新。')
   })
 

@@ -7,7 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpServer } from './mcp.js'
 import { initStore, flushAll, events } from './store.js'
 import * as store from './store.js'
-import { initLibrary, scan, listBooks, getBook, summary, currentBookId, getLibraryDir, loadBook } from './library.js'
+import { initLibrary, scan, listBooks, getBook, summary, currentBookId, getLibraryDir, loadBook, checkFinished, setFinished, setTocOverride } from './library.js'
 import { initEmbedding } from './embed.js'
 import { getSettings, initSettings, updateSettings } from './settings.js'
 import * as proactive from './proactive.js'
@@ -82,7 +82,8 @@ app.post('/api/rescan', (req, res) => res.json({ books: scan(true) }))
 app.get('/api/books/:id', (req, res) => {
   const book = bookOr404(req, res)
   if (!book) return
-  res.json({ ...summary(book), toc: book.meta?.toc ?? [], chapters: book.meta ? proactive.chaptersOf(book.meta) : [], state: store.getState(book.id) })
+  const chapters = book.meta ? proactive.chaptersOf(book.meta) : []
+  res.json({ ...summary(book), toc: book.meta?.toc ?? [], tocSource: book.meta?.tocSource ?? 'book', tocUsable: !chapters.fallback, chapters, state: store.getState(book.id) })
 })
 
 // 扫描版 PDF：本机文字识别（排队、暂停、取透明文字层）
@@ -108,17 +109,39 @@ app.get('/api/books/:id/file', (req, res) => {
 app.post('/api/books/:id/progress', (req, res) => {
   const book = bookOr404(req, res)
   if (!book) return
-  const { section, fraction, label, tocLabel, cfi, activeSeconds } = req.body
+  const { section, fraction, label, tocLabel, cfi, activeSeconds, idleSeconds } = req.body
+  let finished = false
   if (Number.isInteger(section)) {
-    const prev = store.getState(book.id).progress?.section ?? null
+    const before = store.getState(book.id)
+    const prev = before.progress?.section ?? null
+    const prevFurthest = before.furthest
     store.updateProgress(book.id, { section, fraction, label, tocLabel, cfi })
     proactive.onProgress(book.id, prev, section)
+    if (checkFinished(book.id, prevFurthest)) {
+      finished = true
+      store.logExchange({ role: 'system', kind: 'book_done', bookId: book.id, title: book.meta?.title })
+      proactive.onFinished(book.id)
+    }
   }
   if (activeSeconds) {
     store.addReadingTime(book.id, activeSeconds)
     proactive.onHeartbeat(book.id, Math.min(activeSeconds, 120))
   }
-  res.json({ ok: true })
+  // 书开着但没在读（切到别的窗口、标签页在后台、长时间没操作）：单独记，不算阅读时长
+  if (idleSeconds) store.addIdleTime(book.id, idleSeconds)
+  res.json({ ok: true, finished })
+})
+
+// 手动标记读完 / 取消
+app.post('/api/books/:id/finished', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json({ finished: setFinished(book.id, !!req.body.on) })
+})
+
+// 恢复书自带的目录（丢掉重建的目录）
+app.delete('/api/books/:id/toc', (req, res) => {
+  const book = bookOr404(req, res)
+  if (book) res.json({ toc: setTocOverride(book.id, null) })
 })
 
 app.post('/api/books/:id/selection', (req, res) => {
@@ -368,6 +391,8 @@ app.use('/vendor/marked', express.static(path.join(root, 'node_modules/marked/li
 app.use(express.static(path.join(root, 'web')))
 
 scan()
+proactive.setSectionsLoader(id => loadBook(id)?.sections)
+proactive.restoreSessions(listBooks().map(b => b.id))
 initOcr(config.ocr)
 setInterval(() => { try { scan() } catch (e) { console.error(e) } }, 30000)
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flushAll(); process.exit(0) })

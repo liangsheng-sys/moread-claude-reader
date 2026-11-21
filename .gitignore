@@ -2,3 +2,8 @@ node_modules/
 data/
 *.log
 .claude/settings.local.json
+config.local.json
+CLAUDE.local.md
+# 书库只发布示例书，其余是各人自己的书
+/书库/*
+!/书库/示例/

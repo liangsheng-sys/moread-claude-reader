@@ -1,7 +1,6 @@
 // 墨知桌面：本地阅读器 + 给 Claude Code 的 MCP 伴读接口。只监听 127.0.0.1。
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createMcpServer } from './mcp.js'
@@ -20,16 +19,9 @@ import { exportBookMarkdown } from './export.js'
 import { formatInboxItem } from './inbox.js'
 import { buildId } from './build.js'
 import { cancelOcr, initOcr, ocrLayer, startOcr } from './ocr.js'
+import { loadConfig, root } from './config.js'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const config = {
-  port: 8848,
-  libraryDir: '../书库',
-  dataDir: './data',
-  spoilerGuard: true,
-  embedding: { enabled: true, model: 'Xenova/multilingual-e5-small', dtype: 'q8' },
-  ...JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')),
-}
+const config = loadConfig()
 // 调试：MOREAD_DATA_DIR 指向一份数据副本、MOREAD_PORT 换个端口，不碰真实的阅读记录。
 // 必须两个一起用：伴读监听（scripts/watch.mjs）发现默认端口上的服务停了会立刻用真实数据重新拉起。
 const dataDir = path.resolve(root, process.env.MOREAD_DATA_DIR || config.dataDir)

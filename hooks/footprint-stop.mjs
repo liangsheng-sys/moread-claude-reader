@@ -1,12 +1,9 @@
 // Stop hook：Claude 答完一轮后，从对话记录里数出这轮回复的字数，记入陪伴足迹。
 // 只统计字数，不上传内容；阅读器没开或解析失败都静默跳过。
 import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { configPort } from '../server/config.js'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-let port = 8848
-try { port = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')).port ?? port } catch {}
+const port = configPort()
 
 function replyChars(transcriptPath) {
   const lines = fs.readFileSync(transcriptPath, 'utf8').trimEnd().split('\n')

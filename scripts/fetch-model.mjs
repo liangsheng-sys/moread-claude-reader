@@ -1,11 +1,10 @@
 // 断点续传下载向量模型（网络不稳时用）。国内可设 HF_ENDPOINT=https://hf-mirror.com
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { defaultModelDir } from '../server/embed.js'
+import { loadConfig } from '../server/config.js'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const config = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'))
+const config = loadConfig()
 const model = config.embedding?.model ?? 'Xenova/multilingual-e5-small'
 const dtype = config.embedding?.dtype ?? 'q8'
 const endpoint = (process.env.HF_ENDPOINT ?? config.embedding?.remoteHost ?? 'https://huggingface.co').replace(/\/$/, '')

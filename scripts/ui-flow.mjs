@@ -3,7 +3,7 @@ import puppeteer from 'puppeteer-core'
 const [bookId, section, quote, outDir, mode] = process.argv.slice(2)
 const mcp = (name, args) => fetch('http://127.0.0.1:8848/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) }).then(r => r.json()).then(r => r.result.content[0].text)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
+const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
 const page = await browser.newPage()
 page.on('pageerror', e => console.log('[pageerror]', e.message))
 page.on('console', m => m.type() === 'error' && !m.text().includes('404') && console.log('[console]', m.text()))

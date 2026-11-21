@@ -30,7 +30,10 @@ const merge = (base, over) => {
 }
 
 export function loadConfig() {
-  return merge(merge(defaults, read('config.json')), read('config.local.json'))
+  const config = merge(merge(defaults, read('config.json')), read('config.local.json'))
+  // 调试 / 截图用：临时换一个书库，不改配置文件
+  if (process.env.MOREAD_LIBRARY_DIR) config.libraryDir = process.env.MOREAD_LIBRARY_DIR
+  return config
 }
 
 export function configPort() {

@@ -2,7 +2,17 @@
 
 > 本地桌面 PDF / EPUB 阅读器 + Claude Code 伴读。不只是"选中一段问 AI"——Claude 知道你读到哪、看得到书里的图，会在书页边上留批注、读完一章写笔记、你卡住时问一句，像一个陪你读完整本书的朋友。
 
-<!-- TODO 截图：书库 / 阅读页（带 Claude 的波浪线批注）/ 伴读侧栏 / 足迹页 -->
+![阅读页：书页上有 Claude 留的波浪线和高亮批注，右侧是伴读对话](docs/images/reader-chat.png)
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/annotation.png" alt="点开自己的批注，下面是 Claude 的回复" /><br /><b>批注讨论</b> · 在书边和 Claude 你来我往</td>
+    <td width="33%"><img src="docs/images/library.png" alt="书库：继续阅读、阅读状态与分类筛选" /><br /><b>书库</b> · 按阅读状态、分类、标签找书</td>
+    <td width="33%"><img src="docs/images/stats.png" alt="足迹：交流轮数、一起读的书、时间线" /><br /><b>足迹</b> · 一起读了什么、聊了多少</td>
+  </tr>
+</table>
+
+<sub>截图用的是仓库自带的示例书，批注和对话是演示数据。</sub>
 
 ## 和"AI 问答式阅读"有什么不一样
 

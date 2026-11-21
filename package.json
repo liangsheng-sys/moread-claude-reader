@@ -1,6 +1,6 @@
 {
   "name": "moread-claude-reader",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "本地桌面 PDF/EPUB 阅读器 + Claude Code 伴读 · Local desktop PDF/EPUB reader with a Claude Code reading companion (MCP)",
   "private": true,
   "type": "module",

@@ -26,7 +26,7 @@ const params = new URLSearchParams(location.search)
 const id = params.get('id')
 const base = `/api/books/${id}`
 let book = await api(base)
-document.title = `${book.title} · 墨知`
+document.title = `${book.title} · CC伴读`
 $('#title').textContent = book.title
 const isPdf = book.format === 'pdf'
 const unit = isPdf ? '页' : '节'

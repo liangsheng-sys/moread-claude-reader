@@ -4,7 +4,7 @@ import { ensureServer, base } from '../server/launcher.js'
 
 if (await ensureServer()) {
   exec(`start "" "${base}/"`)
-  console.log(`墨知已在运行：${base}`)
+  console.log(`CC伴读已在运行：${base}`)
 } else {
   console.error('启动失败，请查看 data/server.log')
   process.exitCode = 1

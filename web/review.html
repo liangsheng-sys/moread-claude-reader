@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>墨知 · 回顾</title>
+<title>CC伴读 · 回顾</title>
 <link rel="icon" href="/favicon.svg">
 <script src="/theme.js"></script>
 <link rel="stylesheet" href="/style.css">
@@ -125,7 +125,7 @@ $('#askBtn').onclick = async () => {
 $('#exportBtn').onclick = () => {
   const list = filtered()
   const isAnn = $('#fKind').value === 'ann'
-  const out = [`# 墨知 · 回顾（${new Date().toLocaleDateString('zh-CN')}）`, '']
+  const out = [`# CC伴读 · 回顾（${new Date().toLocaleDateString('zh-CN')}）`, '']
   const groups = new Map()
   for (const x of list) { if (!groups.has(x.bookId)) groups.set(x.bookId, []); groups.get(x.bookId).push(x) }
   for (const [bookId, items] of groups) {
@@ -142,7 +142,7 @@ $('#exportBtn').onclick = () => {
   // 沙箱外的普通页面，直接用 blob 下载
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([out.join('\n')], { type: 'text/markdown' }))
-  a.download = `墨知回顾-${new Date().toISOString().slice(0, 10)}.md`
+  a.download = `CC伴读回顾-${new Date().toISOString().slice(0, 10)}.md`
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }

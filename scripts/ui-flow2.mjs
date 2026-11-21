@@ -2,7 +2,7 @@
 import puppeteer from 'puppeteer-core'
 const [bookId, outDir] = process.argv.slice(2)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
+const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
 const page = await browser.newPage()
 page.on('pageerror', e => console.log('[pageerror]', e.message))
 await page.goto(`http://127.0.0.1:8848/reader.html?id=${bookId}`, { waitUntil: 'networkidle2' })

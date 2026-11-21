@@ -2,12 +2,12 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { buildId } from './build.js'
+import { loadConfig, root } from './config.js'
 
-export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const config = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'))
-export const base = `http://127.0.0.1:${config.port ?? 8848}`
+export { root }
+const config = loadConfig()
+export const base = `http://127.0.0.1:${config.port}`
 
 export async function alive() {
   try { return (await fetch(`${base}/api/books`, { signal: AbortSignal.timeout(1500) })).ok } catch { return false }

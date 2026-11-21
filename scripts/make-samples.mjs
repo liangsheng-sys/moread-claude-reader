@@ -27,7 +27,7 @@ const html = `<!doctype html><meta charset="utf-8"><title>Git 图解入门</titl
 <h1>第0章 前言</h1><p>本书用图解的方式讲 Git。每章配有示意图和练习。</p>` +
   chapters.map(([t, body, kind], i) => `<h1>${t}</h1><p>${body}</p><img src="data:image/svg+xml;base64,${Buffer.from(svg(kind)).toString('base64')}"><pre>$ git status\n$ git log --oneline --graph</pre>${filler(i)}`).join('')
 fs.writeFileSync(path.join(tmp, 'git.html'), html)
-const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 execFileSync(chrome, ['--headless=new', '--disable-gpu', '--no-pdf-header-footer', '--generate-pdf-document-outline', `--user-data-dir=${path.join(tmp, 'chrome')}`, `--print-to-pdf=${path.join(out, 'Git图解入门.pdf')}`, pathToFileURL(path.join(tmp, 'git.html')).href], { stdio: 'inherit' })
 
 // EPUB

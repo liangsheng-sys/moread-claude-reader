@@ -1,7 +1,7 @@
 // 调试用：用本机 Chrome 打开页面截图并收集控制台错误。node scripts/ui-check.mjs <path> <out.png> [waitMs]
 import puppeteer from 'puppeteer-core'
 const [p = '/', out = 'shot.png', wait = '2500'] = process.argv.slice(2)
-const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
+const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, defaultViewport: { width: 1400, height: 860 } })
 const page = await browser.newPage()
 page.on('console', m => ['error', 'warning'].includes(m.type()) && console.log(`[${m.type()}]`, m.text()))
 page.on('pageerror', e => console.log('[pageerror]', e.message))

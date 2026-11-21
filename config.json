@@ -1,6 +1,6 @@
 {
   "port": 8848,
-  "libraryDir": "../书库",
+  "libraryDir": "./书库",
   "dataDir": "./data",
   "spoilerGuard": true,
   "embedding": {

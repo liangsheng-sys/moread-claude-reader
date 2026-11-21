@@ -1,12 +1,9 @@
 // UserPromptSubmit hook：每次用户在终端说话时，把当前阅读状态附给 Claude，并把这句话的字数记入陪伴足迹。
 // 阅读器没开就什么也不输出，绝不阻塞对话。
 import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { configPort } from '../server/config.js'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-let port = 8848
-try { port = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')).port ?? port } catch {}
+const port = configPort()
 
 let promptChars = 0
 try { promptChars = [...(JSON.parse(fs.readFileSync(0, 'utf8')).prompt ?? '')].length } catch {}

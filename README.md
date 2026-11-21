@@ -85,10 +85,12 @@
 
 ## 配置 `config.json`
 
+本机想改的项写在 `config.local.json`（不入库），会覆盖 `config.json`。
+
 | 项 | 默认 | 说明 |
 | --- | --- | --- |
 | `port` | 8848 | 改了要同步改 `.mcp.json` |
-| `libraryDir` | `../书库` | 书库目录 |
+| `libraryDir` | `./书库` | 书库目录（本机在 `config.local.json` 里改成了 `../书库`） |
 | `spoilerGuard` | true | 防剧透的初始值（之后以设置页为准） |
 | `embedding.enabled` | true | 关掉则只用词法检索 |
 | `embedding.modelDir` | 用户目录 `.cache` | **必须是纯英文路径**（onnxruntime 在 Windows 上读不了中文路径） |

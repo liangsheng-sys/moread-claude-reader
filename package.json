@@ -1,17 +1,28 @@
 {
-  "name": "moread-desk",
-  "version": "0.6.2",
-  "description": "",
-  "main": "index.js",
+  "name": "moread-claude-reader",
+  "version": "0.6.3",
+  "description": "本地桌面 PDF/EPUB 阅读器 + Claude Code 伴读 · Local desktop PDF/EPUB reader with a Claude Code reading companion (MCP)",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "mangosagocreamwithpomelo",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server/index.js",
     "fetch-model": "node scripts/fetch-model.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "mcp-server",
+    "epub-reader",
+    "pdf-reader",
+    "reading-companion",
+    "ebook",
+    "ai-reading"
+  ],
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.32.2",

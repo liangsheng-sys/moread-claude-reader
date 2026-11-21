@@ -11,7 +11,7 @@ export function exportBookMarkdown(book) {
   const { meta } = book
   const unit = meta.format === 'pdf' ? '页' : '节'
   const where = s => `第${s}${unit}`
-  const out = [`# ${meta.title}`, meta.author ? `*${meta.author}*` : '', `导出于 ${date(new Date().toISOString())} · 墨知桌面`, '']
+  const out = [`# ${meta.title}`, meta.author ? `*${meta.author}*` : '', `导出于 ${date(new Date().toISOString())} · CC伴读`, '']
 
   const summary = getBookSummary(book.id)
   if (summary) out.push('## 学习进度摘要', '', summary.content, '')

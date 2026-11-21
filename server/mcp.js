@@ -47,7 +47,7 @@ const chars = s => [...(s ?? '')].length
 
 export function createMcpServer() {
   const server = new McpServer({ name: 'moread-desk', version: '0.2.0' }, {
-    instructions: '墨知桌面伴读：读取用户在本地阅读器里的进度、正文、划线，并能在书页上留下批注、在侧栏说话。默认只读取用户已读范围。',
+    instructions: 'CC伴读：读取用户在本地阅读器里的进度、正文、划线，并能在书页上留下批注、在侧栏说话。默认只读取用户已读范围。',
   })
 
   const bookArg = { book_id: z.string().optional().describe('书籍 ID，省略则为用户当前正在读的书') }

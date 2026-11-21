@@ -1,13 +1,13 @@
 ---
 name: companion
-description: 开始伴读模式：监听墨知阅读器，实时接收用户在阅读器里的提问、留言、批注回复和主动陪读任务。用户说「开始伴读」或运行 /companion 时使用。
+description: 开始伴读模式：监听 CC伴读 阅读器，实时接收用户在阅读器里的提问、留言、批注回复和主动陪读任务。用户说「开始伴读」或运行 /companion 时使用。
 ---
 
 # 开始伴读
 
 1. 用 **Monitor** 工具启动监听（不要用 Bash 后台运行）：
    - command：`node scripts/watch.mjs`
-   - description：`墨知阅读器消息`
+   - description：`CC伴读阅读器消息`
    - timeout_ms：`3600000`（实际会被限制为 30 分钟）
 2. 看到 `[墨知] 已连接阅读器` 后，在终端只回一句「伴读已开始，在阅读器里问我就好」，不要多说。
 3. 之后每条通知是一段 `[墨知 kind=... book_id=... section=...]` 加正文：

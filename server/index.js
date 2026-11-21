@@ -1,4 +1,4 @@
-// 墨知桌面：本地阅读器 + 给 Claude Code 的 MCP 伴读接口。只监听 127.0.0.1。
+// CC伴读：本地阅读器 + 给 Claude Code 的 MCP 伴读接口。只监听 127.0.0.1。
 import fs from 'node:fs'
 import path from 'node:path'
 import express from 'express'
@@ -460,7 +460,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flushAll(); pro
 process.on('exit', flushAll)
 
 app.listen(config.port, '127.0.0.1', () => {
-  console.log(`墨知桌面已启动：http://127.0.0.1:${config.port}`)
+  console.log(`CC伴读已启动：http://127.0.0.1:${config.port}`)
   console.log(`书库目录：${getLibraryDir()}（放入 PDF / EPUB 即可，30 秒自动扫描）`)
   console.log(`MCP 接口：http://127.0.0.1:${config.port}/mcp`)
 })

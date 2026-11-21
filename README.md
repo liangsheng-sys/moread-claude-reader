@@ -40,7 +40,7 @@
 ## 安装
 
 ```bash
-git clone https://github.com/<GitHub用户名>/moread-claude-reader.git
+git clone https://github.com/liangsheng-sys/moread-claude-reader.git
 cd moread-claude-reader
 npm install
 ```

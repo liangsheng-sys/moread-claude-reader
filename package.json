@@ -35,5 +35,10 @@
   },
   "devDependencies": {
     "puppeteer-core": "^23.11.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liangsheng-sys/moread-claude-reader.git"
+  },
+  "homepage": "https://github.com/liangsheng-sys/moread-claude-reader"
 }
